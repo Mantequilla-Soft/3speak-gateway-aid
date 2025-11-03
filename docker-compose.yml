@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  gateway-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - MONGODB_CONNECTION_STRING=${MONGODB_CONNECTION_STRING:-mongodb://mongodb:27017/3speak}
+      - SQLITE_DB_PATH=/app/data/gateway-monitor.db
+      - GATEWAY_BASE_URL=${GATEWAY_BASE_URL:-https://encoder-gateway.infra.3speak.tv/api/v0}
+      - LOG_LEVEL=info
+      - CORS_ORIGINS=http://localhost:3000,https://monitor.3speak.tv
+    volumes:
+      - gateway_data:/app/data
+      - gateway_logs:/app/logs
+    restart: unless-stopped
+    depends_on:
+      - mongodb
+    networks:
+      - gateway-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  mongodb:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USERNAME:-admin}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD:-password}
+      - MONGO_INITDB_DATABASE=3speak
+    volumes:
+      - mongodb_data:/data/db
+      - ./scripts/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    restart: unless-stopped
+    networks:
+      - gateway-network
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - gateway-monitor
+    restart: unless-stopped
+    networks:
+      - gateway-network
+
+volumes:
+  gateway_data:
+    driver: local
+  gateway_logs:
+    driver: local
+  mongodb_data:
+    driver: local
+
+networks:
+  gateway-network:
+    driver: bridge
