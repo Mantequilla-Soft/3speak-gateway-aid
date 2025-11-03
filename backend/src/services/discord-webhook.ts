@@ -20,6 +20,7 @@ export class DiscordWebhookService {
   private webhookUrl: string | null = null;
   private lastZone: 'green' | 'yellow' | 'red' | null = null;
   private lastAlertTime: Date | null = null;
+  private lastGatewayHealth: 'healthy' | 'faulty' | 'dead' | null = null;
 
   constructor(webhookUrl?: string) {
     this.webhookUrl = webhookUrl || process.env.DISCORD_WEBHOOK_URL || null;
@@ -183,6 +184,112 @@ export class DiscordWebhookService {
       });
     } catch (error) {
       logger.error('Failed to send Discord webhook alert:', error);
+    }
+  }
+
+  /**
+   * Check gateway health and send alerts on status changes
+   */
+  async checkGatewayHealthAndAlert(currentHealth: 'healthy' | 'faulty' | 'dead'): Promise<void> {
+    if (!this.webhookUrl) {
+      return; // Webhooks disabled
+    }
+
+    // Only alert if health status has changed
+    if (this.lastGatewayHealth !== null && this.lastGatewayHealth !== currentHealth) {
+      await this.sendGatewayHealthAlert(this.lastGatewayHealth, currentHealth);
+    }
+
+    this.lastGatewayHealth = currentHealth;
+  }
+
+  /**
+   * Send gateway health change alert to Discord
+   */
+  private async sendGatewayHealthAlert(
+    previousHealth: 'healthy' | 'faulty' | 'dead',
+    currentHealth: 'healthy' | 'faulty' | 'dead'
+  ): Promise<void> {
+    if (!this.webhookUrl) return;
+
+    let title: string;
+    let description: string;
+    let color: number;
+    let emoji: string;
+
+    // Determine alert type based on transition
+    if (currentHealth === 'dead') {
+      emoji = '🔴';
+      title = `${emoji} GATEWAY DOWN - API Not Responding`;
+      description = 'The gateway API is not responding to health checks. The gateway may be offline or unreachable.';
+      color = 0xFF0000; // Red
+    } else if (currentHealth === 'faulty') {
+      emoji = '🟡';
+      if (previousHealth === 'dead') {
+        title = `${emoji} Gateway Recovering - Still Faulty`;
+        description = 'Gateway API is responding again, but the last completed job was force processed. Gateway may still have issues.';
+      } else {
+        title = `${emoji} Gateway Health Degraded`;
+        description = 'The last completed job had to be force processed. Gateway may be experiencing issues with normal job completion.';
+      }
+      color = 0xFFA500; // Orange
+    } else if (currentHealth === 'healthy') {
+      emoji = '✅';
+      if (previousHealth === 'dead') {
+        title = `${emoji} Gateway Fully Recovered`;
+        description = 'Gateway API is responding and the last job completed normally. System is back to healthy state.';
+      } else {
+        title = `${emoji} Gateway Health Restored`;
+        description = 'Gateway is now processing jobs normally without requiring force processing.';
+      }
+      color = 0x00FF00; // Green
+    } else {
+      return;
+    }
+
+    const healthStatusMap = {
+      'healthy': '✅ Healthy',
+      'faulty': '🟡 Faulty',
+      'dead': '🔴 Dead'
+    };
+
+    const message: DiscordWebhookMessage = {
+      embeds: [{
+        title,
+        description,
+        color,
+        timestamp: new Date().toISOString(),
+        fields: [
+          {
+            name: 'Previous Status',
+            value: healthStatusMap[previousHealth],
+            inline: true
+          },
+          {
+            name: 'Current Status',
+            value: healthStatusMap[currentHealth],
+            inline: true
+          },
+          {
+            name: 'Timestamp',
+            value: new Date().toLocaleString(),
+            inline: false
+          }
+        ]
+      }]
+    };
+
+    try {
+      await axios.post(this.webhookUrl, message, {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        timeout: 10000
+      });
+
+      logger.info(`Discord gateway health alert sent: ${previousHealth} → ${currentHealth}`);
+    } catch (error) {
+      logger.error('Failed to send Discord gateway health alert:', error);
     }
   }
 

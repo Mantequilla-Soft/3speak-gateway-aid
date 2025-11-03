@@ -498,12 +498,15 @@ router.get('/dashboard', async (req, res) => {
     };
 
     // Check and send Discord alerts if needed
-    await discordWebhook.checkAndAlert(workloadZone, {
-      ratio: workloadRatio,
-      activeJobs: activeJobs,
-      activeEncoders: activeEncodersCount,
-      oldJobsDetected: oldJobsDetected
-    });
+    await Promise.all([
+      discordWebhook.checkAndAlert(workloadZone, {
+        ratio: workloadRatio,
+        activeJobs: activeJobs,
+        activeEncoders: activeEncodersCount,
+        oldJobsDetected: oldJobsDetected
+      }),
+      discordWebhook.checkGatewayHealthAndAlert(gatewayHealth)
+    ]);
 
     logger.info('Dashboard data fetched successfully', {
       availableJobs: dashboardData.availableJobs,
