@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "description": "Backend service for Gateway Monitor - 3Speak video encoding infrastructure monitoring",
   "main": "dist/server.js",
-  "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
