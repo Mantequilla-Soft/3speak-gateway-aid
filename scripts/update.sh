@@ -22,7 +22,7 @@ npm install --production
 
 echo "   → Backend dependencies"
 cd backend
-npm install --production
+npm install  # Need devDependencies for TypeScript build
 cd ..
 
 echo "   → Frontend dependencies"
