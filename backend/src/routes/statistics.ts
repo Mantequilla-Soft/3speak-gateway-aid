@@ -69,8 +69,10 @@ router.get('/daily', async (req, res) => {
         by_encoder: byEncoder,
         by_quality: byQuality,
         average_encoding_time: Math.round(stat.average_encoding_time || 0),
-        success_rate: 1.0, // TODO: Calculate from completed vs failed
-        total_encoding_time: Math.round(stat.total_encoding_time || 0)
+        success_rate: Math.round((stat.success_rate || 0) * 100) / 100, // Real success rate from MongoDB
+        total_encoding_time: Math.round(stat.total_encoding_time || 0),
+        completed: stat.completed || 0,
+        failed: stat.failed || 0
       };
     });
 

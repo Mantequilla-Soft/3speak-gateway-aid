@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { SQLiteManager } from '../services/sqlite';
+import { MongoDBConnector } from '../services/mongodb';
 import { logger } from '../utils/logger';
 import { ApiResponse, Encoder } from '../types/index';
 import { config } from '../config/index';
@@ -18,16 +19,28 @@ function getSQLiteManager(): SQLiteManager {
 
 /**
  * GET /api/encoders
- * Get all registered encoders
+ * Get all registered encoders with their last activity
  */
 router.get('/', async (req, res) => {
   try {
     const sqliteManager = getSQLiteManager();
+    const mongoConnector = MongoDBConnector.getInstance();
     const encoders = await sqliteManager.getAllEncoders();
     
-    const response: ApiResponse<Encoder[]> = {
+    // Enrich encoders with last activity data from MongoDB
+    const enrichedEncoders = await Promise.all(
+      encoders.map(async (encoder) => {
+        const lastActivity = await mongoConnector.getEncoderLastActivity(encoder.encoder_id);
+        return {
+          ...encoder,
+          last_activity: lastActivity
+        };
+      })
+    );
+    
+    const response: ApiResponse = {
       success: true,
-      data: encoders
+      data: enrichedEncoders
     };
 
     res.json(response);

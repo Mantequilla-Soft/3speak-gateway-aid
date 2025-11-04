@@ -362,10 +362,12 @@ export class MongoDBConnector {
         return [
           {
             _id: new Date().toISOString().split('T')[0],
+            videos_encoded: 2,
             completed: 2,
             failed: 0,
             total_encoding_time: 9000,
-            average_encoding_time: 4500
+            average_encoding_time: 4500,
+            success_rate: 1.0
           }
         ];
       }
@@ -373,28 +375,76 @@ export class MongoDBConnector {
       const pipeline = [
         {
           $match: {
-            status: 'complete', // Match actual status value from gateway
-            completed_at: {
-              $gte: new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+            status: { $in: ['completed', 'complete', 'failed'] }, // Include both completed and failed
+            $or: [
+              { completed_at: { $gte: new Date(Date.now() - days * 24 * 60 * 60 * 1000) } },
+              { 
+                status: 'failed',
+                last_pinged: { $gte: new Date(Date.now() - days * 24 * 60 * 60 * 1000) }
+              }
+            ]
+          }
+        },
+        {
+          $addFields: {
+            // Calculate encoding time from assigned_date to completed_at (when encoder was actually working)
+            calculated_encoding_time: {
+              $cond: [
+                { $and: [
+                  { $ne: ["$assigned_date", null] },
+                  { $ne: ["$completed_at", null] }
+                ]},
+                { $divide: [
+                  { $subtract: ["$completed_at", "$assigned_date"] },
+                  1000 // Convert milliseconds to seconds
+                ]},
+                0
+              ]
             }
           }
         },
         {
           $group: {
             _id: {
-              date: { $dateToString: { format: "%Y-%m-%d", date: "$completed_at" } },
+              date: { 
+                $dateToString: { 
+                  format: "%Y-%m-%d", 
+                  date: { 
+                    $ifNull: ["$completed_at", "$last_pinged"] 
+                  } 
+                } 
+              },
               encoder_id: "$assigned_to",
-              quality: "$current_quality"
+              quality: "$current_quality",
+              status: "$status"
             },
             count: { $sum: 1 },
-            total_encoding_time: { $sum: "$encoding_time" },
-            avg_encoding_time: { $avg: "$encoding_time" }
+            total_encoding_time: { $sum: "$calculated_encoding_time" },
+            avg_encoding_time: { $avg: "$calculated_encoding_time" }
           }
         },
         {
           $group: {
             _id: "$_id.date",
             videos_encoded: { $sum: "$count" },
+            completed: {
+              $sum: {
+                $cond: [
+                  { $in: ["$_id.status", ["completed", "complete"]] },
+                  "$count",
+                  0
+                ]
+              }
+            },
+            failed: {
+              $sum: {
+                $cond: [
+                  { $eq: ["$_id.status", "failed"] },
+                  "$count",
+                  0
+                ]
+              }
+            },
             by_encoder: {
               $push: {
                 encoder_id: "$_id.encoder_id",
@@ -409,6 +459,17 @@ export class MongoDBConnector {
             },
             total_encoding_time: { $sum: "$total_encoding_time" },
             average_encoding_time: { $avg: "$avg_encoding_time" }
+          }
+        },
+        {
+          $addFields: {
+            success_rate: {
+              $cond: [
+                { $gt: ["$videos_encoded", 0] },
+                { $divide: ["$completed", "$videos_encoded"] },
+                0
+              ]
+            }
           }
         },
         {
@@ -452,11 +513,15 @@ export class MongoDBConnector {
       }
       
       const matchStage: any = {
-        status: 'complete', // Match actual status value from gateway
+        status: { $in: ['completed', 'complete', 'failed'] }, // Include both completed and failed
         assigned_to: { $exists: true, $ne: null },
-        completed_at: {
-          $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) // Last 7 days
-        }
+        $or: [
+          { completed_at: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } },
+          { 
+            status: 'failed',
+            last_pinged: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
+          }
+        ]
       };
 
       if (encoderId) {
@@ -468,12 +533,34 @@ export class MongoDBConnector {
         {
           $group: {
             _id: "$assigned_to",
-            jobs_completed: { $sum: 1 },
-            total_encoding_time: { $sum: "$encoding_time" },
-            average_encoding_time: { $avg: "$encoding_time" },
+            jobs_completed: { 
+              $sum: {
+                $cond: [
+                  { $in: ["$status", ["completed", "complete"]] },
+                  1,
+                  0
+                ]
+              }
+            },
+            jobs_failed: {
+              $sum: {
+                $cond: [
+                  { $eq: ["$status", "failed"] },
+                  1,
+                  0
+                ]
+              }
+            },
+            total_jobs: { $sum: 1 },
+            total_encoding_time: { $sum: { $ifNull: ["$encoding_time", 0] } },
+            average_encoding_time: { $avg: { $ifNull: ["$encoding_time", 0] } },
             success_rate: {
               $avg: {
-                $cond: [{ $eq: ["$status", "complete"] }, 1, 0]
+                $cond: [
+                  { $in: ["$status", ["completed", "complete"]] }, 
+                  1, 
+                  0
+                ]
               }
             }
           }
@@ -672,5 +759,312 @@ export class MongoDBConnector {
         encoder_id: 'did:key:z6MkdemoEncoder2'
       }
     ];
+  }
+
+  // ============================================================
+  // Gateway Aid Fallback System Methods
+  // ============================================================
+
+  /**
+   * List available jobs for Aid system (pending jobs only)
+   */
+  async listAvailableJobsForAid(): Promise<Job[]> {
+    try {
+      if (!this.client || !this.connected || !this.db) {
+        logger.warn('MongoDB not connected for Aid listAvailableJobs');
+        return [];
+      }
+
+      const collection = this.db.collection('jobs');
+      const jobs = await collection
+        .find({ 
+          status: 'pending',
+          assigned_to: { $exists: false }
+        })
+        .sort({ created_at: 1 }) // Oldest first (FIFO)
+        .toArray();
+
+      return jobs.map(job => this.mapJobDocument(job));
+    } catch (error) {
+      logger.error('Failed to list available jobs for Aid', error);
+      throw new DatabaseError('Failed to list available jobs', error as Error);
+    }
+  }
+
+  /**
+   * Atomically claim a job for Aid system
+   * Uses findOneAndUpdate for atomic operation to prevent double-assignment
+   */
+  async claimJobForAid(jobId: string, encoderDid: string): Promise<Job | null> {
+    try {
+      if (!this.client || !this.connected || !this.db) {
+        logger.warn('MongoDB not connected for Aid claimJob');
+        return null;
+      }
+
+      const collection = this.db.collection('jobs');
+      
+      // Atomic operation: find pending job and assign it in one operation
+      const result = await collection.findOneAndUpdate(
+        { 
+          id: jobId,
+          status: 'pending',
+          assigned_to: { $exists: false }
+        },
+        { 
+          $set: { 
+            status: 'assigned',
+            assigned_to: encoderDid,
+            assigned_date: new Date(),
+            serviced_by_aid: true, // Flag to track Aid-serviced jobs
+            aid_claimed_at: new Date()
+          }
+        },
+        { 
+          returnDocument: 'after' // Return the updated document
+        }
+      );
+
+      if (!result) {
+        logger.warn(`Job ${jobId} not available for claiming (already assigned or doesn't exist)`);
+        return null;
+      }
+
+      logger.info(`Job ${jobId} claimed by ${encoderDid} via Aid system`);
+      return this.mapJobDocument(result);
+    } catch (error) {
+      logger.error(`Failed to claim job ${jobId} for Aid`, error);
+      throw new DatabaseError('Failed to claim job', error as Error);
+    }
+  }
+
+  /**
+   * Update job progress for Aid system
+   */
+  async updateJobProgressForAid(
+    jobId: string, 
+    encoderDid: string,
+    status: 'assigned' | 'running' | 'failed',
+    progress: { download_pct: number; pct: number }
+  ): Promise<boolean> {
+    try {
+      if (!this.client || !this.connected || !this.db) {
+        logger.warn('MongoDB not connected for Aid updateJobProgress');
+        return false;
+      }
+
+      const collection = this.db.collection('jobs');
+      
+      const updateFields: any = {
+        status,
+        progress,
+        last_pinged: new Date()
+      };
+
+      const result = await collection.updateOne(
+        { 
+          id: jobId,
+          assigned_to: encoderDid,
+          serviced_by_aid: true // Only update Aid-serviced jobs
+        },
+        { $set: updateFields }
+      );
+
+      if (result.matchedCount === 0) {
+        logger.warn(`Job ${jobId} not found or not assigned to ${encoderDid}`);
+        return false;
+      }
+
+      logger.debug(`Job ${jobId} progress updated: ${progress.pct}%`);
+      return true;
+    } catch (error) {
+      logger.error(`Failed to update job ${jobId} progress for Aid`, error);
+      throw new DatabaseError('Failed to update job progress', error as Error);
+    }
+  }
+
+  /**
+   * Complete a job for Aid system
+   */
+  async completeJobForAid(
+    jobId: string,
+    encoderDid: string,
+    result: any
+  ): Promise<boolean> {
+    try {
+      if (!this.client || !this.connected || !this.db) {
+        logger.warn('MongoDB not connected for Aid completeJob');
+        return false;
+      }
+
+      const collection = this.db.collection('jobs');
+      
+      const updateResult = await collection.updateOne(
+        { 
+          id: jobId,
+          assigned_to: encoderDid,
+          serviced_by_aid: true // Only complete Aid-serviced jobs
+        },
+        { 
+          $set: { 
+            status: 'completed',
+            completed_at: new Date(),
+            result,
+            progress: 100
+          }
+        }
+      );
+
+      if (updateResult.matchedCount === 0) {
+        logger.warn(`Job ${jobId} not found or not assigned to ${encoderDid}`);
+        return false;
+      }
+
+      logger.info(`Job ${jobId} completed by ${encoderDid} via Aid system`);
+      return true;
+    } catch (error) {
+      logger.error(`Failed to complete job ${jobId} for Aid`, error);
+      throw new DatabaseError('Failed to complete job', error as Error);
+    }
+  }
+
+  /**
+   * Release timed-out Aid jobs (jobs assigned via Aid but not pinged for > 1 hour)
+   */
+  async releaseTimedOutAidJobs(): Promise<number> {
+    try {
+      if (!this.client || !this.connected || !this.db) {
+        logger.warn('MongoDB not connected for Aid releaseTimedOutJobs');
+        return 0;
+      }
+
+      const collection = this.db.collection('jobs');
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+
+      const result = await collection.updateMany(
+        {
+          serviced_by_aid: true,
+          status: { $in: ['assigned', 'running'] },
+          $or: [
+            { last_pinged: { $lt: oneHourAgo } },
+            { 
+              last_pinged: { $exists: false },
+              aid_claimed_at: { $lt: oneHourAgo }
+            }
+          ]
+        },
+        {
+          $set: {
+            status: 'pending',
+            progress: 0
+          },
+          $unset: {
+            assigned_to: '',
+            assigned_date: '',
+            serviced_by_aid: '',
+            aid_claimed_at: '',
+            last_pinged: ''
+          }
+        }
+      );
+
+      if (result.modifiedCount > 0) {
+        logger.info(`Released ${result.modifiedCount} timed-out Aid jobs back to pending`);
+      }
+
+      return result.modifiedCount;
+    } catch (error) {
+      logger.error('Failed to release timed-out Aid jobs', error);
+      throw new DatabaseError('Failed to release timed-out jobs', error as Error);
+    }
+  }
+
+  /**
+   * Check if this is the first job serviced by Aid (for Discord alert)
+   */
+  async isFirstAidServicedJob(): Promise<boolean> {
+    try {
+      if (!this.client || !this.connected || !this.db) {
+        return false;
+      }
+
+      const collection = this.db.collection('jobs');
+      const count = await collection.countDocuments({ serviced_by_aid: true });
+      
+      return count === 1; // True if this is the first Aid-serviced job
+    } catch (error) {
+      logger.error('Failed to check first Aid job', error);
+      return false;
+    }
+  }
+
+  /**
+   * Get the last activity timestamp for a specific encoder
+   * Looks at recent jobs to find when the encoder was last active
+   */
+  async getEncoderLastActivity(encoderDid: string): Promise<Date | null> {
+    try {
+      if (!this.client || !this.connected || !this.db) {
+        return null;
+      }
+
+      const collection = this.db.collection('jobs');
+      
+      // Find the most recent job assigned to this encoder
+      const recentJob = await collection
+        .find({ assigned_to: encoderDid })
+        .sort({ 
+          completed_at: -1,  // Prefer completed jobs first
+          last_pinged: -1,   // Then by last ping
+          assigned_date: -1  // Then by assignment date
+        })
+        .limit(1)
+        .toArray();
+
+      if (recentJob.length === 0) {
+        return null; // Encoder has no job history
+      }
+
+      const job = recentJob[0];
+      
+      // Return the most recent timestamp we have for this encoder's activity
+      return job.completed_at || job.last_pinged || job.assigned_date || job.created_at;
+    } catch (error) {
+      logger.error(`Failed to get last activity for encoder ${encoderDid}`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Map MongoDB document to Job interface
+   */
+  private mapJobDocument(doc: any): Job {
+    return {
+      _id: doc._id?.toString(),
+      id: doc.id,
+      status: doc.status,
+      created_at: doc.created_at,
+      start_date: doc.start_date,
+      last_pinged: doc.last_pinged,
+      completed_at: doc.completed_at,
+      assigned_to: doc.assigned_to,
+      assigned_date: doc.assigned_date,
+      metadata: doc.metadata,
+      storageMetadata: doc.storageMetadata,
+      input: doc.input,
+      result: doc.result,
+      owner: doc.owner,
+      permlink: doc.permlink,
+      encoder_id: doc.encoder_id,
+      input_uri: doc.input_uri,
+      input_size: doc.input_size,
+      progress: doc.progress,
+      estimated_completion: doc.estimated_completion,
+      current_codec: doc.current_codec,
+      current_quality: doc.current_quality,
+      ipfs_cid: doc.ipfs_cid,
+      error_message: doc.error_message,
+      encoding_time: doc.encoding_time
+    };
   }
 }

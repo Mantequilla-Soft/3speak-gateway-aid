@@ -16,7 +16,6 @@ import {
   DialogActions,
   TextField,
   IconButton,
-  Chip,
   Grid,
   Card,
   CardContent,
@@ -40,6 +39,7 @@ interface Encoder {
   is_active: boolean;
   created_at: Date;
   last_seen: Date;
+  last_activity?: Date | null; // New field from MongoDB job history
 }
 
 interface EncoderFormData {
@@ -172,20 +172,68 @@ export function Encoders() {
     }
   };
 
-  const formatRelativeTime = (date: Date): string => {
+  const formatLastActivity = (lastActivity: Date | null | undefined): { text: string; color: string; emoji: string } => {
+    if (!lastActivity) {
+      return {
+        text: 'Never worked',
+        color: 'text.disabled',
+        emoji: '💤'
+      };
+    }
+
     const now = new Date();
-    const diff = now.getTime() - new Date(date).getTime();
+    const diff = now.getTime() - new Date(lastActivity).getTime();
     const minutes = Math.floor(diff / 60000);
     const hours = Math.floor(minutes / 60);
     const days = Math.floor(hours / 24);
 
-    if (minutes < 1) return 'Just now';
-    if (minutes < 60) return `${minutes}m ago`;
-    if (hours < 24) return `${hours}h ago`;
-    return `${days}d ago`;
+    if (minutes < 60) {
+      return {
+        text: `Active ${minutes}m ago`,
+        color: 'success.main',
+        emoji: '🔥'
+      };
+    }
+    if (hours < 6) {
+      return {
+        text: `Active ${hours}h ago`,
+        color: 'success.main',
+        emoji: '✅'
+      };
+    }
+    if (hours < 24) {
+      return {
+        text: `Active ${hours}h ago`,
+        color: 'warning.main',
+        emoji: '⚠️'
+      };
+    }
+    if (days === 1) {
+      return {
+        text: 'Active yesterday',
+        color: 'text.secondary',
+        emoji: '😴'
+      };
+    }
+    if (days < 7) {
+      return {
+        text: `Active ${days}d ago`,
+        color: 'text.secondary',
+        emoji: '😴'
+      };
+    }
+    return {
+      text: 'Taking a vacation',
+      color: 'text.disabled',
+      emoji: '🏖️'
+    };
   };
 
-  const activeEncoders = encoders.filter(e => e.is_active).length;
+  const activeEncoders = encoders.filter(e => {
+    if (!e.last_activity) return false;
+    const hoursSinceActivity = (new Date().getTime() - new Date(e.last_activity).getTime()) / (1000 * 60 * 60);
+    return hoursSinceActivity < 24;
+  }).length;
   const inactiveEncoders = encoders.length - activeEncoders;
 
   return (
@@ -286,15 +334,16 @@ export function Encoders() {
                 <TableCell>Node Name</TableCell>
                 <TableCell>Hive Account</TableCell>
                 <TableCell>DID Key</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Last Seen</TableCell>
+                <TableCell>Last Active</TableCell>
                 <TableCell>Location</TableCell>
                 <TableCell>Hardware</TableCell>
                 <TableCell align="right">Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {encoders.map((encoder) => (
+              {encoders.map((encoder) => {
+                const activityInfo = formatLastActivity(encoder.last_activity);
+                return (
                 <TableRow key={encoder.encoder_id}>
                   <TableCell>
                     <Typography variant="body2" fontWeight="medium">
@@ -310,13 +359,13 @@ export function Encoders() {
                     </Tooltip>
                   </TableCell>
                   <TableCell>
-                    <Chip
-                      label={encoder.is_active ? 'Active' : 'Inactive'}
-                      color={encoder.is_active ? 'success' : 'default'}
-                      size="small"
-                    />
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <span>{activityInfo.emoji}</span>
+                      <Typography variant="body2" sx={{ color: activityInfo.color }}>
+                        {activityInfo.text}
+                      </Typography>
+                    </Box>
                   </TableCell>
-                  <TableCell>{formatRelativeTime(encoder.last_seen)}</TableCell>
                   <TableCell>{encoder.location || '-'}</TableCell>
                   <TableCell>{encoder.hardware_type || '-'}</TableCell>
                   <TableCell align="right">
@@ -339,7 +388,8 @@ export function Encoders() {
                     </IconButton>
                   </TableCell>
                 </TableRow>
-              ))}
+                );
+              })}
             </TableBody>
           </Table>
         </TableContainer>

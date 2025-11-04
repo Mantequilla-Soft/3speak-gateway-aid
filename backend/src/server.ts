@@ -12,11 +12,13 @@ import { MongoDBConnector } from './services/mongodb';
 import { GatewayMonitor } from './services/gateway';
 import { SQLiteManager } from './services/sqlite';
 import { WebSocketManager } from './services/websocket';
+import { AidTimeoutMonitor } from './services/aid-timeout-monitor';
 
 // Routes
 import jobsRouter from './routes/jobs';
 import encodersRouter from './routes/encoders';
 import statisticsRouter from './routes/statistics';
+import aidRouter from './routes/aid';
 
 // Load environment variables
 dotenv.config();
@@ -31,6 +33,7 @@ class GatewayMonitorServer {
   private mongodb!: MongoDBConnector;
   private gatewayMonitor!: GatewayMonitor;
   private sqliteManager!: SQLiteManager;
+  private aidTimeoutMonitor!: AidTimeoutMonitor;
 
   constructor() {
     this.app = express();
@@ -49,6 +52,7 @@ class GatewayMonitorServer {
     this.gatewayMonitor = new GatewayMonitor();
     this.sqliteManager = SQLiteManager.getInstance(config.sqlite.path);
     this.wsManager = new WebSocketManager(this.wsServer);
+    this.aidTimeoutMonitor = AidTimeoutMonitor.getInstance();
   }
 
   private initializeMiddleware(): void {
@@ -90,6 +94,7 @@ class GatewayMonitorServer {
     this.app.use('/api/jobs', jobsRouter);
     this.app.use('/api/encoders', encodersRouter);
     this.app.use('/api/statistics', statisticsRouter);
+    this.app.use('/aid', aidRouter); // Gateway Aid Fallback System routes
 
     // 404 handler
     this.app.use('*', (req, res) => {
@@ -135,6 +140,10 @@ class GatewayMonitorServer {
 
       // Initialize databases in background (non-blocking)
       this.initializeDatabasesAsync();
+
+      // Start Gateway Aid timeout monitor
+      this.aidTimeoutMonitor.start();
+      logger.info('✅ Gateway Aid timeout monitor started');
 
     } catch (error) {
       logger.error('Failed to start server', error);

@@ -338,4 +338,48 @@ export class DiscordWebhookService {
       return false;
     }
   }
+
+  /**
+   * Send a custom alert message to Discord
+   * Public method for use by other services (e.g., Aid timeout monitor)
+   */
+  async sendCustomAlert(alert: {
+    title: string;
+    description: string;
+    color: number;
+    fields?: Array<{
+      name: string;
+      value: string;
+      inline?: boolean;
+    }>;
+    timestamp?: Date;
+  }): Promise<void> {
+    if (!this.webhookUrl) {
+      logger.debug('Discord webhook not configured, skipping custom alert');
+      return;
+    }
+
+    const message: DiscordWebhookMessage = {
+      embeds: [{
+        title: alert.title,
+        description: alert.description,
+        color: alert.color,
+        timestamp: (alert.timestamp || new Date()).toISOString(),
+        fields: alert.fields
+      }]
+    };
+
+    try {
+      await axios.post(this.webhookUrl, message, {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        timeout: 10000
+      });
+
+      logger.info(`Custom Discord alert sent: ${alert.title}`);
+    } catch (error) {
+      logger.error('Failed to send custom Discord alert:', error);
+    }
+  }
 }

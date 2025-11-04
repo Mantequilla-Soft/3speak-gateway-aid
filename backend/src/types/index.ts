@@ -211,3 +211,132 @@ export class GatewayAPIError extends GatewayMonitorError {
     this.name = 'GatewayAPIError';
   }
 }
+
+// Gateway Aid Fallback System Types
+
+export interface AidJobListRequest {
+  encoder_did: string;
+  limit?: number;
+}
+
+export interface AidJobListResponse {
+  success: boolean;
+  jobs: AidJobSummary[];
+  error?: string;
+  code?: string;
+}
+
+export interface AidJobSummary {
+  id: string;
+  created_at: Date;
+  metadata: {
+    video_owner: string;
+    video_permlink: string;
+  };
+  storageMetadata: {
+    app: string;
+    key: string;
+    type: string;
+  };
+  input: {
+    uri: string;
+    size: number;
+  };
+}
+
+export interface AidClaimJobRequest {
+  job_id: string;
+  encoder_did: string;
+}
+
+export interface AidClaimJobResponse {
+  success: boolean;
+  job_id?: string;
+  assigned_to?: string;
+  assigned_at?: Date;
+  job_details?: AidJobDetails;
+  error?: string;
+  code?: string;
+}
+
+export interface AidJobDetails {
+  input: {
+    uri: string;
+    size: number;
+  };
+  metadata: {
+    video_owner: string;
+    video_permlink: string;
+  };
+  storageMetadata: {
+    app: string;
+    key: string;
+    type: string;
+  };
+}
+
+export interface AidUpdateJobRequest {
+  job_id: string;
+  encoder_did: string;
+  status: 'assigned' | 'running' | 'failed';
+  progress: {
+    download_pct: number;
+    pct: number;
+  };
+}
+
+export interface AidUpdateJobResponse {
+  success: boolean;
+  job_id?: string;
+  status?: string;
+  updated_at?: Date;
+  error?: string;
+  code?: string;
+}
+
+export interface AidCompleteJobRequest {
+  job_id: string;
+  encoder_did: string;
+  result: {
+    cid: string;
+  };
+}
+
+export interface AidCompleteJobResponse {
+  success: boolean;
+  job_id?: string;
+  completed_at?: Date;
+  message?: string;
+  error?: string;
+  code?: string;
+}
+
+export interface AidHealthResponse {
+  status: 'healthy' | 'unhealthy';
+  version: string;
+  mongodb_connected: boolean;
+  timestamp: Date;
+}
+
+// Aid Error Codes
+export enum AidErrorCode {
+  ENCODER_NOT_AUTHORIZED = 'ENCODER_NOT_AUTHORIZED',
+  ENCODER_INACTIVE = 'ENCODER_INACTIVE',
+  JOB_NOT_FOUND = 'JOB_NOT_FOUND',
+  JOB_ALREADY_ASSIGNED = 'JOB_ALREADY_ASSIGNED',
+  JOB_ALREADY_COMPLETED = 'JOB_ALREADY_COMPLETED',
+  JOB_NOT_OWNED = 'JOB_NOT_OWNED',
+  INVALID_CID = 'INVALID_CID',
+  INVALID_REQUEST = 'INVALID_REQUEST',
+}
+
+export class AidServiceError extends GatewayMonitorError {
+  constructor(
+    message: string,
+    public code: AidErrorCode,
+    statusCode: number = 400
+  ) {
+    super(message, code, statusCode);
+    this.name = 'AidServiceError';
+  }
+}
