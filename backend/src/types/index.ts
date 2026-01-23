@@ -311,6 +311,33 @@ export interface AidCompleteJobResponse {
   code?: string;
 }
 
+export interface AidGetJobRequest {
+  job_id: string;
+}
+
+export interface AidGetJobResponse {
+  success: boolean;
+  job?: {
+    id: string;
+    status: string;
+    assigned_to: string | null;
+    is_owned_by_requester: boolean;
+    created_at: Date;
+    assigned_date?: Date;
+    progress?: any;
+    metadata: {
+      video_owner: string;
+      video_permlink: string;
+    };
+    input: {
+      uri: string;
+      size: number;
+    };
+  };
+  error?: string;
+  code?: string;
+}
+
 export interface AidHealthResponse {
   status: 'healthy' | 'unhealthy';
   version: string;

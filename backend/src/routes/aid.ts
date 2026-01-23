@@ -15,6 +15,8 @@ import {
   AidUpdateJobResponse,
   AidCompleteJobRequest,
   AidCompleteJobResponse,
+  AidGetJobRequest,
+  AidGetJobResponse,
   AidErrorCode
 } from '../types/index';
 
@@ -149,6 +151,69 @@ router.post('/v1/claim-job', validateEncoderDID, async (req: Request, res: Respo
     const response: AidClaimJobResponse = {
       success: false,
       error: 'Failed to claim job',
+      code: 'INTERNAL_ERROR'
+    };
+    res.status(500).json(response);
+  }
+});
+
+/**
+ * GET /aid/v1/job/:id
+ * Get job details including ownership verification
+ * Requires DID authorization
+ */
+router.get('/v1/job/:id', validateEncoderDID, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      const response: AidGetJobResponse = {
+        success: false,
+        error: 'Missing job_id parameter',
+        code: AidErrorCode.INVALID_REQUEST
+      };
+      return res.status(400).json(response);
+    }
+
+    const encoderDid = req.encoder!.encoder_id;
+    const mongoConnector = MongoDBConnector.getInstance();
+    
+    const job = await mongoConnector.getJobForAid(id, encoderDid);
+
+    if (!job) {
+      const response: AidGetJobResponse = {
+        success: false,
+        error: 'Job not found',
+        code: AidErrorCode.JOB_NOT_FOUND
+      };
+      return res.status(404).json(response);
+    }
+
+    // Check if the requesting encoder owns this job
+    const isOwnedByRequester = job.assigned_to === encoderDid;
+
+    const response: AidGetJobResponse = {
+      success: true,
+      job: {
+        id: job.id,
+        status: job.status,
+        assigned_to: job.assigned_to || null,
+        is_owned_by_requester: isOwnedByRequester,
+        created_at: job.created_at,
+        assigned_date: job.assigned_date,
+        progress: job.progress,
+        metadata: job.metadata,
+        input: job.input
+      }
+    };
+
+    logger.debug(`Job ${id} queried by ${encoderDid} (owned: ${isOwnedByRequester})`);
+    res.json(response);
+  } catch (error) {
+    logger.error('Failed to get job for Aid', error);
+    const response: AidGetJobResponse = {
+      success: false,
+      error: 'Failed to retrieve job',
       code: 'INTERNAL_ERROR'
     };
     res.status(500).json(response);

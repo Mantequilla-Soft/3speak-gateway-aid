@@ -839,6 +839,32 @@ export class MongoDBConnector {
   }
 
   /**
+   * Get job details for Aid system (including ownership verification)
+   */
+  async getJobForAid(jobId: string, encoderDid: string): Promise<Job | null> {
+    try {
+      if (!this.client || !this.connected || !this.db) {
+        logger.warn('MongoDB not connected for Aid getJob');
+        return null;
+      }
+
+      const collection = this.db.collection('jobs');
+      const jobDoc = await collection.findOne({ id: jobId });
+
+      if (!jobDoc) {
+        logger.warn(`Job ${jobId} not found`);
+        return null;
+      }
+
+      logger.debug(`Job ${jobId} retrieved for ${encoderDid} (owned: ${jobDoc.assigned_to === encoderDid})`);
+      return this.mapJobDocument(jobDoc);
+    } catch (error) {
+      logger.error(`Failed to get job ${jobId} for Aid`, error);
+      throw new DatabaseError('Failed to get job', error as Error);
+    }
+  }
+
+  /**
    * Update job progress for Aid system
    */
   async updateJobProgressForAid(

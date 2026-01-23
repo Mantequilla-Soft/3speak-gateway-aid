@@ -35,6 +35,14 @@ A comprehensive monitoring and management dashboard for the 3Speak video encodin
 - **Encoder Performance**: Bar chart comparison
 - Manual refresh (no auto-polling for analytics)
 
+### 🆘 **Gateway Aid Fallback System**
+- REST API fallback when websocket connection fails
+- Atomic job claiming to prevent duplicates
+- Heartbeat-based timeout monitoring
+- Job ownership verification
+- DID-based authentication
+- See [Gateway Aid Implementation Guide](docs/GATEWAY_AID_ENCODER_IMPLEMENTATION.md)
+
 ## 🏗️ Architecture
 
 ```
@@ -199,6 +207,21 @@ Encoder management operations (Create, Update, Delete) are protected with **HTTP
 | GET | `/api/statistics/encoders?days=30` | Per-encoder metrics |
 | GET | `/api/statistics/dashboard` | Dashboard summary |
 | GET | `/api/statistics/gateway-health` | Gateway health status |
+
+### Gateway Aid API (Fallback System)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/aid/v1/health` | GET | Health check (no auth) |
+| `/aid/v1/list-jobs` | POST | List available jobs for claiming |
+| `/aid/v1/claim-job` | POST | Atomically claim a job |
+| `/aid/v1/job/:id` | GET | Get job details + ownership verification |
+| `/aid/v1/update-job` | POST | Update job progress (heartbeat) |
+| `/aid/v1/complete-job` | POST | Complete job with results |
+
+**Authentication**: All Aid endpoints (except health) require `X-Encoder-DID` header.
+
+For detailed implementation guide, see [Gateway Aid Documentation](docs/GATEWAY_AID_ENCODER_IMPLEMENTATION.md).
 
 ## 🗂️ Project Structure
 
