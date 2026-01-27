@@ -115,3 +115,5 @@ docker-compose.override.yml
 docs/DEPLOYMENT_PRODUCTION.md
 docs/GATEWAY_AID_FALLBACK_SYSTEM.md
 docs/GATEWAY_AID_ENCODER_IMPLEMENTATION.md
+# Internal documentation
+internal-docs/
