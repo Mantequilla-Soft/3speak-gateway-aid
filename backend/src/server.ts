@@ -19,6 +19,7 @@ import jobsRouter from './routes/jobs';
 import encodersRouter from './routes/encoders';
 import statisticsRouter from './routes/statistics';
 import aidRouter from './routes/aid';
+import directEncodingRouter from './routes/direct-encoding';
 
 // Load environment variables
 dotenv.config();
@@ -95,6 +96,7 @@ class GatewayMonitorServer {
     this.app.use('/api/encoders', encodersRouter);
     this.app.use('/api/statistics', statisticsRouter);
     this.app.use('/aid', aidRouter); // Gateway Aid Fallback System routes
+    this.app.use('/api/direct-encoding', directEncodingRouter);
 
     // 404 handler
     this.app.use('*', (req, res) => {

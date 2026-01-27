@@ -1062,6 +1062,147 @@ export class MongoDBConnector {
   }
 
   /**
+   * Get embed jobs (direct encoding) with video metadata
+   * @param limit Number of jobs to return (default 30)
+   */
+  async getEmbedJobs(limit: number = 30) {
+    try {
+      if (!this.client) {
+        throw new Error('Not connected to MongoDB');
+      }
+
+      const threespeakDb = this.client.db('threespeak');
+      const embedJobsCollection = threespeakDb.collection('embed-jobs');
+      const embedVideoCollection = threespeakDb.collection('embed-video');
+
+      // Get last N jobs, sorted by creation date descending
+      const jobs = await embedJobsCollection
+        .find({})
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .toArray();
+
+      // Enrich with video metadata
+      const enrichedJobs = await Promise.all(
+        jobs.map(async (job) => {
+          const video = await embedVideoCollection.findOne({
+            owner: job.owner,
+            permlink: job.permlink
+          });
+
+          return {
+            ...job,
+            _id: job._id?.toString(),
+            video: video ? {
+              ...video,
+              _id: video._id?.toString()
+            } : null
+          };
+        })
+      );
+
+      return enrichedJobs;
+    } catch (error) {
+      logger.error('Failed to fetch embed jobs', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get embed job statistics
+   */
+  async getEmbedJobStats() {
+    try {
+      if (!this.client) {
+        throw new Error('Not connected to MongoDB');
+      }
+
+      const threespeakDb = this.client.db('threespeak');
+      const embedJobsCollection = threespeakDb.collection('embed-jobs');
+
+      // Get today's date at midnight
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const [
+        totalToday,
+        completedToday,
+        failedToday,
+        encoderDistribution,
+        avgEncodingTime
+      ] = await Promise.all([
+        // Total jobs today
+        embedJobsCollection.countDocuments({
+          createdAt: { $gte: today }
+        }),
+
+        // Completed jobs today
+        embedJobsCollection.countDocuments({
+          createdAt: { $gte: today },
+          status: 'completed'
+        }),
+
+        // Failed jobs today
+        embedJobsCollection.countDocuments({
+          createdAt: { $gte: today },
+          status: 'failed'
+        }),
+
+        // Jobs per encoder
+        embedJobsCollection.aggregate([
+          {
+            $group: {
+              _id: '$assignedWorker',
+              count: { $sum: 1 }
+            }
+          },
+          {
+            $sort: { count: -1 }
+          }
+        ]).toArray(),
+
+        // Average encoding time (for completed jobs)
+        embedJobsCollection.aggregate([
+          {
+            $match: {
+              status: 'completed',
+              assignedAt: { $exists: true },
+              webhookReceivedAt: { $exists: true }
+            }
+          },
+          {
+            $project: {
+              duration: {
+                $subtract: ['$webhookReceivedAt', '$assignedAt']
+              }
+            }
+          },
+          {
+            $group: {
+              _id: null,
+              avgDuration: { $avg: '$duration' }
+            }
+          }
+        ]).toArray()
+      ]);
+
+      return {
+        totalToday,
+        completedToday,
+        failedToday,
+        encoderDistribution: encoderDistribution.map(e => ({
+          encoder: e._id,
+          count: e.count
+        })),
+        avgEncodingTimeMs: avgEncodingTime[0]?.avgDuration || 0
+      };
+    } catch (error) {
+      logger.error('Failed to fetch embed job stats', error);
+      throw error;
+    }
+  }
+
+  /**
    * Map MongoDB document to Job interface
    */
   private mapJobDocument(doc: any): Job {
