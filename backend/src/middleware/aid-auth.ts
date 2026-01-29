@@ -20,6 +20,7 @@ declare global {
 /**
  * Middleware to validate encoder DID authorization
  * Checks if encoder exists in SQLite database and is active
+ * Accepts DID from either X-Encoder-DID header (preferred) or encoder_did in body (legacy)
  */
 export const validateEncoderDID = async (
   req: Request,
@@ -27,13 +28,14 @@ export const validateEncoderDID = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const { encoder_did } = req.body;
+    // Check both header (new) and body (legacy) for backwards compatibility
+    const encoder_did = (req.headers['x-encoder-did'] as string) || req.body.encoder_did;
 
     // Check if encoder_did is provided
     if (!encoder_did) {
       const response: ApiResponse = {
         success: false,
-        error: 'encoder_did is required',
+        error: 'encoder_did is required (provide via X-Encoder-DID header or encoder_did in body)',
         data: { code: AidErrorCode.INVALID_REQUEST }
       };
       res.status(400).json(response);
