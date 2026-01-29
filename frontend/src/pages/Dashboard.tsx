@@ -12,7 +12,8 @@ import {
   TableCell,
   TableContainer,
   TableHead,
-  TableRow
+  TableRow,
+  Link
 } from '@mui/material';
 import {
   VideoLibrary,
@@ -248,9 +249,16 @@ export function Dashboard() {
                           />
                         </TableCell>
                         <TableCell>
-                          <Typography variant="body2">
-                            {job.videoOwner}/{job.videoPermlink}
-                          </Typography>
+                          <Link
+                            href={`https://3speak.tv/watch?v=${job.videoOwner}/${job.videoPermlink}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            sx={{ textDecoration: 'none' }}
+                          >
+                            <Typography variant="body2" sx={{ '&:hover': { textDecoration: 'underline' } }}>
+                              {job.videoOwner}/{job.videoPermlink}
+                            </Typography>
+                          </Link>
                         </TableCell>
                         <TableCell>{job.videoSizeFormatted}</TableCell>
                         <TableCell>
