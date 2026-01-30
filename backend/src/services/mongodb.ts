@@ -1281,9 +1281,11 @@ export class MongoDBConnector {
       // Determine what to update based on publish_type
       const updateFields: any = { video_v2 };
       
-      // Only set status to 'published' if publish_type is 'publish'
+      // Only set status to 'published' if publish_type is 'publish' or missing/undefined
       // For 'scheduled' videos, leave status alone - scheduler will handle it
-      if (video.publish_type === 'publish') {
+      // Default to 'publish' behavior for safety (most videos are immediate publish)
+      const publishType = video.publish_type || 'publish';
+      if (publishType === 'publish') {
         updateFields.status = 'published';
       }
 
@@ -1431,7 +1433,7 @@ export class MongoDBConnector {
         permlink,
         created: { $gte: oneDayAgo }, // SAFETY: Only videos created in last 24 hours
         $or: [
-          { status: { $ne: 'published' } }, // Job complete but video not published yet
+          { status: { $in: ['encoding_ipfs', 'encoding', 'queued_encode', 'processing'] } }, // Job complete but video stuck in encoding
           { // OR published but missing video_v2
             status: 'published',
             $or: [
