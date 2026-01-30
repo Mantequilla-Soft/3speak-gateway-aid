@@ -1266,6 +1266,27 @@ export class MongoDBConnector {
       const video_v2 = `ipfs://${cid}/manifest.m3u8`;
       const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
+      // First, fetch the video to check publish_type
+      const video = await videosCollection.findOne({
+        owner,
+        permlink,
+        created: { $gte: oneDayAgo }
+      });
+
+      if (!video) {
+        logger.warn(`Video entry not found for ${owner}/${permlink}`);
+        return false;
+      }
+
+      // Determine what to update based on publish_type
+      const updateFields: any = { video_v2 };
+      
+      // Only set status to 'published' if publish_type is 'publish'
+      // For 'scheduled' videos, leave status alone - scheduler will handle it
+      if (video.publish_type === 'publish') {
+        updateFields.status = 'published';
+      }
+
       const updateResult = await videosCollection.updateOne(
         { 
           owner,
@@ -1273,24 +1294,19 @@ export class MongoDBConnector {
           created: { $gte: oneDayAgo } // SAFETY: Only videos created in last 24 hours
         },
         { 
-          $set: { 
-            status: 'published',
-            video_v2
-          }
+          $set: updateFields
         }
       );
-
-      if (updateResult.matchedCount === 0) {
-        logger.warn(`Video entry not found for ${owner}/${permlink}`);
-        return false;
-      }
 
       if (updateResult.modifiedCount === 0) {
         logger.info(`Video entry ${owner}/${permlink} already up to date`);
         return true;
       }
 
-      logger.info(`Updated video entry ${owner}/${permlink} with video_v2: ${video_v2}`);
+      const statusMsg = video.publish_type === 'publish' 
+        ? 'set status to published and added'
+        : 'added (scheduled video, status unchanged)';
+      logger.info(`Updated video entry ${owner}/${permlink}: ${statusMsg} video_v2: ${video_v2}`);
       return true;
     } catch (error) {
       logger.error(`Failed to update video entry ${owner}/${permlink}`, error);
@@ -1344,12 +1360,17 @@ export class MongoDBConnector {
       const video = await videosCollection.findOne({
         owner,
         permlink,
-        status: 'published',
         created: { $gte: oneDayAgo }, // SAFETY: Only videos created in last 24 hours
         $or: [
-          { video_v2: { $exists: false } },
-          { video_v2: null },
-          { video_v2: '' }
+          { status: { $ne: 'published' } }, // Job complete but video not published yet
+          { // OR published but missing video_v2
+            status: 'published',
+            $or: [
+              { video_v2: { $exists: false } },
+              { video_v2: null },
+              { video_v2: '' }
+            ]
+          }
         ]
       });
 
