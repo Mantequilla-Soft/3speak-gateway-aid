@@ -336,6 +336,24 @@ router.post('/v1/complete-job', validateEncoderDID, async (req: Request, res: Re
       return res.status(404).json(response);
     }
 
+    // Get the job to extract owner/permlink for video update
+    const job = await mongoConnector.getJobById(job_id);
+    
+    // Update video entry in threespeak database
+    if (job && job.metadata?.video_owner && job.metadata?.video_permlink && result.cid) {
+      const videoUpdated = await mongoConnector.updateVideoEntry(
+        job.metadata.video_owner,
+        job.metadata.video_permlink,
+        result.cid
+      );
+      
+      if (videoUpdated) {
+        logger.info(`Video entry updated for ${job.metadata.video_owner}/${job.metadata.video_permlink}`);
+      } else {
+        logger.warn(`Failed to update video entry for ${job.metadata.video_owner}/${job.metadata.video_permlink}`);
+      }
+    }
+
     const response: AidCompleteJobResponse = {
       success: true,
       job_id,

@@ -382,4 +382,27 @@ export class DiscordWebhookService {
       logger.error('Failed to send custom Discord alert:', error);
     }
   }
+
+  /**
+   * Send a custom message to Discord (flexible format)
+   */
+  async sendCustomMessage(message: DiscordWebhookMessage): Promise<void> {
+    if (!this.webhookUrl) {
+      logger.debug('Discord webhook not configured, skipping custom message');
+      return;
+    }
+
+    try {
+      await axios.post(this.webhookUrl, message, {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        timeout: 10000
+      });
+
+      logger.debug('Custom Discord message sent successfully');
+    } catch (error) {
+      logger.error('Failed to send custom Discord message:', error);
+    }
+  }
 }

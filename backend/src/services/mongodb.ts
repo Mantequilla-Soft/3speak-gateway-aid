@@ -5,6 +5,7 @@ import { Job, ActiveJob, DatabaseError } from '../types/index';
 export class MongoDBConnector {
   private client: MongoClient | null = null;
   private db: Db | null = null;
+  private threespeakDb: Db | null = null;
   private connected: boolean = false;
   private connectionString: string = '';
   private static instance: MongoDBConnector | null = null;
@@ -47,14 +48,17 @@ export class MongoDBConnector {
 
       await this.client.connect();
       this.db = this.client.db(dbName);
+      this.threespeakDb = this.client.db('threespeak');
       this.connected = true;
       
       logger.info(`Successfully connected to MongoDB database: ${dbName}`);
+      logger.info(`Successfully connected to threespeak database for video healing`);
     } catch (error) {
       logger.error('Failed to connect to MongoDB', error);
       // Don't throw error, allow graceful degradation
       this.client = null;
       this.db = null;
+      this.threespeakDb = null;
       this.connected = false;
     }
   }
@@ -68,6 +72,7 @@ export class MongoDBConnector {
       this.client = null;
       this.connected = false;
       this.db = null;
+      this.threespeakDb = null;
       logger.info('Disconnected from MongoDB');
     }
   }
@@ -1233,5 +1238,145 @@ export class MongoDBConnector {
       error_message: doc.error_message,
       encoding_time: doc.encoding_time
     };
+  }
+
+  /**
+   * ==========================================
+   * THREESPEAK DATABASE - VIDEO HEALING METHODS
+   * ==========================================
+   */
+
+  /**
+   * Update video entry in threespeak database with the encoded result
+   * Sets status to "published" and adds video_v2 field
+   * CRITICAL SAFETY: Only updates videos created in last 24 hours to avoid touching legacy S3 videos
+   */
+  async updateVideoEntry(
+    owner: string,
+    permlink: string,
+    cid: string
+  ): Promise<boolean> {
+    try {
+      if (!this.client || !this.connected || !this.threespeakDb) {
+        logger.warn('MongoDB threespeak database not connected for updateVideoEntry');
+        return false;
+      }
+
+      const videosCollection = this.threespeakDb.collection('videos');
+      const video_v2 = `ipfs://${cid}/manifest.m3u8`;
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+      const updateResult = await videosCollection.updateOne(
+        { 
+          owner,
+          permlink,
+          created: { $gte: oneDayAgo } // SAFETY: Only videos created in last 24 hours
+        },
+        { 
+          $set: { 
+            status: 'published',
+            video_v2
+          }
+        }
+      );
+
+      if (updateResult.matchedCount === 0) {
+        logger.warn(`Video entry not found for ${owner}/${permlink}`);
+        return false;
+      }
+
+      if (updateResult.modifiedCount === 0) {
+        logger.info(`Video entry ${owner}/${permlink} already up to date`);
+        return true;
+      }
+
+      logger.info(`Updated video entry ${owner}/${permlink} with video_v2: ${video_v2}`);
+      return true;
+    } catch (error) {
+      logger.error(`Failed to update video entry ${owner}/${permlink}`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Get recently completed jobs (last N hours) for healer verification
+   */
+  async getRecentlyCompletedJobs(hoursBack: number = 1): Promise<Job[]> {
+    try {
+      if (!this.client || !this.connected || !this.db) {
+        logger.warn('MongoDB not connected for getRecentlyCompletedJobs');
+        return [];
+      }
+
+      const collection = this.db.collection('jobs');
+      const cutoffTime = new Date(Date.now() - hoursBack * 60 * 60 * 1000);
+
+      const jobs = await collection
+        .find({
+          status: 'completed',
+          completed_at: { $gte: cutoffTime },
+          'result.cid': { $exists: true } // Only jobs with results
+        })
+        .sort({ completed_at: -1 })
+        .toArray();
+
+      return jobs as unknown as Job[];
+    } catch (error) {
+      logger.error('Error fetching recently completed jobs', error);
+      return [];
+    }
+  }
+
+  /**
+   * Check if video entry needs healing (published but missing video_v2)
+   * CRITICAL SAFETY: Only heals videos created in last 24 hours to avoid touching legacy S3 videos
+   */
+  async checkVideoNeedsHealing(owner: string, permlink: string): Promise<boolean> {
+    try {
+      if (!this.client || !this.connected || !this.threespeakDb) {
+        logger.warn('MongoDB threespeak database not connected for checkVideoNeedsHealing');
+        return false;
+      }
+
+      const videosCollection = this.threespeakDb.collection('videos');
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      
+      const video = await videosCollection.findOne({
+        owner,
+        permlink,
+        status: 'published',
+        created: { $gte: oneDayAgo }, // SAFETY: Only videos created in last 24 hours
+        $or: [
+          { video_v2: { $exists: false } },
+          { video_v2: null },
+          { video_v2: '' }
+        ]
+      });
+
+      return video !== null;
+    } catch (error) {
+      logger.error(`Error checking if video ${owner}/${permlink} needs healing`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Get video entry for debugging/testing
+   */
+  async getVideoEntry(owner: string, permlink: string): Promise<any | null> {
+    try {
+      if (!this.client || !this.connected || !this.threespeakDb) {
+        logger.warn('MongoDB threespeak database not connected for getVideoEntry');
+        return null;
+      }
+
+      const videosCollection = this.threespeakDb.collection('videos');
+      const video = await videosCollection.findOne({ owner, permlink });
+      
+      return video;
+    } catch (error) {
+      logger.error(`Error getting video entry ${owner}/${permlink}`, error);
+      return null;
+    }
   }
 }

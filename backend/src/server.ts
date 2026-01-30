@@ -13,6 +13,7 @@ import { GatewayMonitor } from './services/gateway';
 import { SQLiteManager } from './services/sqlite';
 import { WebSocketManager } from './services/websocket';
 import { AidTimeoutMonitor } from './services/aid-timeout-monitor';
+import { VideoHealerService } from './services/video-healer';
 
 // Routes
 import jobsRouter from './routes/jobs';
@@ -35,6 +36,7 @@ class GatewayMonitorServer {
   private gatewayMonitor!: GatewayMonitor;
   private sqliteManager!: SQLiteManager;
   private aidTimeoutMonitor!: AidTimeoutMonitor;
+  private videoHealer!: VideoHealerService;
 
   constructor() {
     this.app = express();
@@ -54,6 +56,7 @@ class GatewayMonitorServer {
     this.sqliteManager = SQLiteManager.getInstance(config.sqlite.path);
     this.wsManager = new WebSocketManager(this.wsServer);
     this.aidTimeoutMonitor = AidTimeoutMonitor.getInstance();
+    this.videoHealer = new VideoHealerService(60, 1); // Check every 60 minutes for jobs in last 1 hour
   }
 
   private initializeMiddleware(): void {
@@ -147,6 +150,10 @@ class GatewayMonitorServer {
       this.aidTimeoutMonitor.start();
       logger.info('✅ Gateway Aid timeout monitor started');
 
+      // Start Video Healer Service
+      this.videoHealer.start();
+      logger.info('✅ Video Healer Service started');
+
     } catch (error) {
       logger.error('Failed to start server', error);
       process.exit(1);
@@ -239,6 +246,9 @@ class GatewayMonitorServer {
 
   public async stop(): Promise<void> {
     logger.info('Shutting down server...');
+    
+    // Stop background services
+    this.videoHealer.stop();
     
     // Close WebSocket connections
     this.wsServer.close();
