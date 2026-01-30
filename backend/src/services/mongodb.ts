@@ -1315,6 +1315,75 @@ export class MongoDBConnector {
   }
 
   /**
+   * Heal stuck jobs that have result CID but wrong status
+   * Returns count of jobs healed
+   */
+  async healStuckJobs(hoursBack: number = 1): Promise<{ healed: Job[], count: number }> {
+    try {
+      if (!this.client || !this.connected || !this.db) {
+        logger.warn('MongoDB not connected for healStuckJobs');
+        return { healed: [], count: 0 };
+      }
+
+      const collection = this.db.collection('jobs');
+      const cutoffTime = new Date(Date.now() - hoursBack * 60 * 60 * 1000);
+
+      // Find jobs with CID but not marked complete
+      const stuckJobs = await collection
+        .find({
+          created_at: { $gte: cutoffTime },
+          'result.cid': { $exists: true },
+          $or: [
+            { status: { $ne: 'complete' } },
+            { completed_at: { $exists: false } },
+            { completed_at: null }
+          ]
+        })
+        .toArray();
+
+      if (stuckJobs.length === 0) {
+        return { healed: [], count: 0 };
+      }
+
+      logger.warn(`Found ${stuckJobs.length} stuck jobs with CID results`);
+
+      const healedJobs: Job[] = [];
+      const now = new Date();
+
+      for (const job of stuckJobs) {
+        try {
+          const updateFields: any = {
+            status: 'complete'
+          };
+
+          // Add completed_at if missing
+          if (!job.completed_at) {
+            updateFields.completed_at = now;
+          }
+
+          const result = await collection.updateOne(
+            { _id: job._id },
+            { $set: updateFields }
+          );
+
+          if (result.modifiedCount > 0) {
+            healedJobs.push(job as unknown as Job);
+            logger.info(`✓ Healed stuck job: ${job.id} (was: ${job.status})`);
+          }
+        } catch (error) {
+          logger.error(`Failed to heal job ${job.id}`, error);
+        }
+      }
+
+      logger.info(`Job healing complete: ${healedJobs.length}/${stuckJobs.length} jobs healed`);
+      return { healed: healedJobs, count: healedJobs.length };
+    } catch (error) {
+      logger.error('Error healing stuck jobs', error);
+      return { healed: [], count: 0 };
+    }
+  }
+
+  /**
    * Get recently completed jobs (last N hours) for healer verification
    */
   async getRecentlyCompletedJobs(hoursBack: number = 1): Promise<Job[]> {

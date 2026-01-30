@@ -79,9 +79,17 @@ export class VideoHealerService {
    */
   private async runHealingCycle(): Promise<void> {
     try {
-      logger.info('Starting Video Healer cycle...');
+      logger.info('Starting Healer cycle...');
       
-      // Get recently completed jobs
+      // STEP 1: Heal stuck jobs first (jobs with CID but wrong status)
+      const { healed: healedJobs, count: jobsHealedCount } = await this.mongodb.healStuckJobs(this.hoursToCheck);
+      
+      if (jobsHealedCount > 0) {
+        logger.info(`✓ Healed ${jobsHealedCount} stuck job(s)`);
+        await this.sendJobHealingNotification(jobsHealedCount, healedJobs);
+      }
+      
+      // STEP 2: Get recently completed jobs (including newly healed ones)
       const recentJobs = await this.mongodb.getRecentlyCompletedJobs(this.hoursToCheck);
       
       if (recentJobs.length === 0) {
@@ -144,9 +152,9 @@ export class VideoHealerService {
       }
 
       // Log summary
-      logger.info(`Video Healer cycle complete: ${healedCount} healed, ${alreadyHealthyCount} healthy, ${errorCount} errors out of ${recentJobs.length} jobs`);
+      logger.info(`Healer cycle complete: ${jobsHealedCount} jobs healed, ${healedCount} videos healed, ${alreadyHealthyCount} healthy, ${errorCount} errors out of ${recentJobs.length} jobs`);
 
-      // Send summary to Discord if any were healed
+      // Send summary to Discord if any videos were healed
       if (healedCount > 0) {
         await this.sendHealingSummary(healedCount, recentJobs.length);
       }
@@ -200,6 +208,49 @@ export class VideoHealerService {
       await this.discordService.sendCustomMessage(message);
     } catch (error) {
       logger.error('Failed to send Discord healing notification', error);
+    }
+  }
+
+  /**
+   * Send notification about healed jobs
+   */
+  private async sendJobHealingNotification(
+    count: number,
+    healedJobs: any[]
+  ): Promise<void> {
+    try {
+      const jobsList = healedJobs.slice(0, 5).map(job => {
+        const owner = job.metadata?.video_owner || 'unknown';
+        const permlink = job.metadata?.video_permlink || 'unknown';
+        return `${owner}/${permlink} (${job.id.substring(0, 8)}...)`;
+      }).join('\n');
+
+      const moreText = healedJobs.length > 5 ? `\n...and ${healedJobs.length - 5} more` : '';
+
+      const message = {
+        embeds: [{
+          title: '🔧 Stuck Jobs Fixed',
+          description: `Found ${count} job(s) with result CID but incomplete status and fixed them.`,
+          color: 0xff9900, // Orange color
+          fields: [
+            {
+              name: 'Jobs Fixed',
+              value: jobsList + moreText,
+              inline: false
+            },
+            {
+              name: 'Action Taken',
+              value: 'Set status to "complete" and added completed_at timestamp',
+              inline: false
+            }
+          ],
+          timestamp: new Date().toISOString()
+        }]
+      };
+
+      await this.discordService.sendCustomMessage(message);
+    } catch (error) {
+      logger.error('Failed to send Discord job healing notification', error);
     }
   }
 
