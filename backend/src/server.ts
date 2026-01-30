@@ -150,9 +150,7 @@ class GatewayMonitorServer {
       this.aidTimeoutMonitor.start();
       logger.info('✅ Gateway Aid timeout monitor started');
 
-      // Start Video Healer Service
-      this.videoHealer.start();
-      logger.info('✅ Video Healer Service started');
+      // Note: Video Healer will start after MongoDB connects (in initializeDatabasesAsync)
 
     } catch (error) {
       logger.error('Failed to start server', error);
@@ -179,8 +177,14 @@ class GatewayMonitorServer {
         )
       ]);
       logger.info('✅ Connected to MongoDB');
+      
+      // Start Video Healer Service AFTER MongoDB is connected
+      this.videoHealer.start();
+      logger.info('✅ Video Healer Service started');
+      
     } catch (error) {
       logger.warn('⚠️  MongoDB connection failed - running without MongoDB', error);
+      logger.warn('⚠️  Video Healer Service NOT started (requires MongoDB)');
     }
   }
 

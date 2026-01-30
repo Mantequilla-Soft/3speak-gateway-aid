@@ -1313,7 +1313,7 @@ export class MongoDBConnector {
 
       const jobs = await collection
         .find({
-          status: 'completed',
+          status: 'complete',
           completed_at: { $gte: cutoffTime },
           'result.cid': { $exists: true } // Only jobs with results
         })
