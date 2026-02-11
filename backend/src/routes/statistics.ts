@@ -465,7 +465,7 @@ router.get('/dashboard', async (req, res) => {
       
       return {
         id: job.id,
-        fullId: job._id || job.id,
+        fullId: job.id, // Use UUID job.id instead of MongoDB _id
         status: job.status,
         videoOwner: job.metadata?.video_owner || job.owner || 'Unknown',
         videoPermlink: job.metadata?.video_permlink || job.permlink || 'unknown',

@@ -18,6 +18,31 @@ function getSQLiteManager(): SQLiteManager {
 }
 
 /**
+ * GET /api/encoders/online
+ * Get all online encoders (last seen within 5 minutes)
+ */
+router.get('/online', async (req, res) => {
+  try {
+    const mongoConnector = MongoDBConnector.getInstance();
+    const onlineNodes = await mongoConnector.getOnlineClusterNodes();
+    
+    const response: ApiResponse = {
+      success: true,
+      data: onlineNodes
+    };
+
+    res.json(response);
+  } catch (error) {
+    logger.error('Error fetching online encoders', error);
+    const response: ApiResponse = {
+      success: false,
+      error: 'Failed to fetch online encoders'
+    };
+    res.status(500).json(response);
+  }
+});
+
+/**
  * GET /api/encoders
  * Get all registered encoders with their last activity
  */

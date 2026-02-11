@@ -617,6 +617,44 @@ export class MongoDBConnector {
   }
 
   /**
+   * Get online cluster nodes (last seen within 5 minutes, excluding banned)
+   */
+  async getOnlineClusterNodes() {
+    try {
+      if (!this.client || !this.connected || !this.db) {
+        logger.warn('MongoDB not connected, cannot fetch online cluster nodes');
+        return [];
+      }
+
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+      const nodesCollection = this.db.collection('cluster_nodes');
+      
+      const onlineNodes = await nodesCollection
+        .find({
+          last_seen: { $gte: fiveMinutesAgo },
+          $or: [
+            { banned: { $exists: false } },
+            { banned: false }
+          ]
+        })
+        .sort({ last_seen: -1 })
+        .toArray();
+
+      return onlineNodes.map(node => ({
+        didKey: node.id,
+        nodeName: node.name,
+        hiveAccount: node.cryptoAccounts?.hive || null,
+        peerId: node.peer_id,
+        lastSeen: node.last_seen,
+        firstSeen: node.first_seen
+      }));
+    } catch (error) {
+      logger.error('Error getting online cluster nodes:', error);
+      return [];
+    }
+  }
+
+  /**
    * Health check for MongoDB connection
    */
   async healthCheck(): Promise<boolean> {
@@ -771,7 +809,8 @@ export class MongoDBConnector {
   // ============================================================
 
   /**
-   * List available jobs for Aid system (pending jobs only)
+   * List available jobs for Aid system (pending, assigned, and queued jobs)
+   * Updated Feb 2026: Now includes assigned jobs to support main gateway auto-assignment
    */
   async listAvailableJobsForAid(): Promise<Job[]> {
     try {
@@ -783,8 +822,7 @@ export class MongoDBConnector {
       const collection = this.db.collection('jobs');
       const jobs = await collection
         .find({ 
-          status: 'pending',
-          assigned_to: { $exists: false }
+          status: { $in: ['pending', 'assigned', 'queued'] }
         })
         .sort({ created_at: 1 }) // Oldest first (FIFO)
         .toArray();

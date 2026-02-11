@@ -20,6 +20,7 @@ import {
   Analytics as AnalyticsIcon,
   Menu as MenuIcon,
   VideoLibrary as VideoLibraryIcon,
+  Circle as CircleIcon,
 } from '@mui/icons-material';
 import { Link, useLocation } from 'react-router-dom';
 import { useState } from 'react';
@@ -34,6 +35,7 @@ const navigationItems = [
   { path: '/', label: 'Dashboard', icon: <DashboardIcon /> },
   { path: '/jobs', label: 'Jobs', icon: <WorkIcon /> },
   { path: '/encoders', label: 'Encoders', icon: <ComputerIcon /> },
+  { path: '/online-encoders', label: "Who's Online", icon: <CircleIcon /> },
   { path: '/direct-encoding', label: 'Direct Encoding', icon: <VideoLibraryIcon /> },
   { path: '/analytics', label: 'Analytics', icon: <AnalyticsIcon /> },
 ];
