@@ -344,4 +344,64 @@ router.get('/:id/stats', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/encoders/auth/check
+ * Check if user is authenticated
+ * @protected Requires admin authentication
+ */
+router.get('/auth/check', basicAuthMiddleware, async (req, res) => {
+  const response: ApiResponse = {
+    success: true,
+    data: { authenticated: true }
+  };
+  res.json(response);
+});
+
+/**
+ * POST /api/encoders/:didKey/ban
+ * Update encoder banned status in MongoDB cluster_nodes
+ * @protected Requires admin authentication
+ */
+router.post('/:didKey/ban', basicAuthMiddleware, async (req, res) => {
+  try {
+    const mongoConnector = MongoDBConnector.getInstance();
+    const { didKey } = req.params;
+    const { banned } = req.body;
+
+    // Validate banned field
+    if (typeof banned !== 'boolean') {
+      const response: ApiResponse = {
+        success: false,
+        error: 'banned field is required and must be a boolean'
+      };
+      return res.status(400).json(response);
+    }
+
+    // Update the banned status
+    const success = await mongoConnector.updateEncoderBannedStatus(didKey, banned);
+
+    if (!success) {
+      const response: ApiResponse = {
+        success: false,
+        error: 'Encoder not found in cluster_nodes'
+      };
+      return res.status(404).json(response);
+    }
+
+    const response: ApiResponse = {
+      success: true,
+      message: `Encoder ${banned ? 'banned' : 'unbanned'} successfully`
+    };
+
+    res.json(response);
+  } catch (error) {
+    logger.error(`Error updating banned status for encoder ${req.params.didKey}`, error);
+    const response: ApiResponse = {
+      success: false,
+      error: 'Failed to update encoder banned status'
+    };
+    res.status(500).json(response);
+  }
+});
+
 export default router;

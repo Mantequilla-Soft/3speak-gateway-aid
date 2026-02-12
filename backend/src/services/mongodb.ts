@@ -617,7 +617,7 @@ export class MongoDBConnector {
   }
 
   /**
-   * Get online cluster nodes (last seen within 5 minutes, excluding banned)
+   * Get online cluster nodes (last seen within 5 minutes, including banned status)
    */
   async getOnlineClusterNodes() {
     try {
@@ -631,11 +631,7 @@ export class MongoDBConnector {
       
       const onlineNodes = await nodesCollection
         .find({
-          last_seen: { $gte: fiveMinutesAgo },
-          $or: [
-            { banned: { $exists: false } },
-            { banned: false }
-          ]
+          last_seen: { $gte: fiveMinutesAgo }
         })
         .sort({ last_seen: -1 })
         .toArray();
@@ -646,11 +642,42 @@ export class MongoDBConnector {
         hiveAccount: node.cryptoAccounts?.hive || null,
         peerId: node.peer_id,
         lastSeen: node.last_seen,
-        firstSeen: node.first_seen
+        firstSeen: node.first_seen,
+        banned: node.banned || false
       }));
     } catch (error) {
       logger.error('Error getting online cluster nodes:', error);
       return [];
+    }
+  }
+
+  /**
+   * Update encoder banned status in cluster_nodes collection
+   */
+  async updateEncoderBannedStatus(didKey: string, banned: boolean): Promise<boolean> {
+    try {
+      if (!this.client || !this.connected || !this.db) {
+        logger.error('MongoDB not connected, cannot update encoder banned status');
+        throw new Error('MongoDB connection not available');
+      }
+
+      const nodesCollection = this.db.collection('cluster_nodes');
+      
+      const result = await nodesCollection.updateOne(
+        { id: didKey },
+        { $set: { banned: banned } }
+      );
+
+      if (result.matchedCount === 0) {
+        logger.warn(`Encoder with DID ${didKey} not found in cluster_nodes`);
+        return false;
+      }
+
+      logger.info(`Updated banned status for encoder ${didKey} to ${banned}`);
+      return true;
+    } catch (error) {
+      logger.error('Error updating encoder banned status:', error);
+      throw error;
     }
   }
 

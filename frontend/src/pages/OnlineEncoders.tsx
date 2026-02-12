@@ -13,8 +13,12 @@ import {
   Chip,
   CircularProgress,
   Alert,
+  IconButton,
+  Tooltip,
 } from '@mui/material';
+import { Block as BlockIcon, CheckCircle as CheckCircleIcon } from '@mui/icons-material';
 import { formatDistanceToNow } from 'date-fns';
+import { useAuth } from '../contexts/AuthContext';
 
 interface OnlineEncoder {
   didKey: string;
@@ -23,12 +27,15 @@ interface OnlineEncoder {
   peerId: string;
   lastSeen: string;
   firstSeen: string;
+  banned: boolean;
 }
 
 export function OnlineEncoders() {
   const [encoders, setEncoders] = useState<OnlineEncoder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [updatingBan, setUpdatingBan] = useState<string | null>(null);
+  const { isAuthenticated } = useAuth();
 
   const fetchOnlineEncoders = async () => {
     try {
@@ -46,6 +53,36 @@ export function OnlineEncoders() {
       setError('Failed to fetch online encoders');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleBanToggle = async (didKey: string, currentBanned: boolean) => {
+    setUpdatingBan(didKey);
+    try {
+      const response = await fetch(`/api/encoders/${encodeURIComponent(didKey)}/ban`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({ banned: !currentBanned }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        // Update local state immediately
+        setEncoders(prev => prev.map(enc => 
+          enc.didKey === didKey ? { ...enc, banned: !currentBanned } : enc
+        ));
+      } else {
+        setError(data.error || 'Failed to update ban status');
+      }
+    } catch (err) {
+      console.error('Error updating ban status:', err);
+      setError('Failed to update ban status');
+    } finally {
+      setUpdatingBan(null);
     }
   };
 
@@ -112,14 +149,29 @@ export function OnlineEncoders() {
           <Table>
             <TableHead>
               <TableRow>
+                <TableCell>Status</TableCell>
                 <TableCell>Encoder</TableCell>
                 <TableCell>Hive Account</TableCell>
                 <TableCell align="right">Last Seen</TableCell>
+                {isAuthenticated && <TableCell align="center">Actions</TableCell>}
               </TableRow>
             </TableHead>
             <TableBody>
               {encoders.map((encoder) => (
                 <TableRow key={encoder.didKey} hover>
+                  <TableCell>
+                    <Box
+                      sx={{
+                        width: 12,
+                        height: 12,
+                        borderRadius: '50%',
+                        backgroundColor: encoder.banned ? '#f44336' : '#4caf50',
+                        boxShadow: encoder.banned 
+                          ? '0 0 8px rgba(244, 67, 54, 0.6)'
+                          : '0 0 8px rgba(76, 175, 80, 0.6)',
+                      }}
+                    />
+                  </TableCell>
                   <TableCell>
                     <Box display="flex" alignItems="center" gap={2}>
                       <Avatar 
@@ -164,6 +216,26 @@ export function OnlineEncoders() {
                       {getRelativeTime(encoder.lastSeen)}
                     </Typography>
                   </TableCell>
+                  {isAuthenticated && (
+                    <TableCell align="center">
+                      <Tooltip title={encoder.banned ? 'Unban encoder' : 'Ban encoder'}>
+                        <IconButton
+                          size="small"
+                          onClick={() => handleBanToggle(encoder.didKey, encoder.banned)}
+                          disabled={updatingBan === encoder.didKey}
+                          color={encoder.banned ? 'success' : 'error'}
+                        >
+                          {updatingBan === encoder.didKey ? (
+                            <CircularProgress size={20} />
+                          ) : encoder.banned ? (
+                            <CheckCircleIcon />
+                          ) : (
+                            <BlockIcon />
+                          )}
+                        </IconButton>
+                      </Tooltip>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>
