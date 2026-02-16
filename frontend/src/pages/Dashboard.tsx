@@ -19,7 +19,9 @@ import {
   VideoLibrary,
   PlayCircleOutline,
   Computer,
-  TrendingUp
+  TrendingUp,
+  Speed,
+  HealthAndSafety
 } from '@mui/icons-material';
 import { WorkloadGauge, WorkloadData } from '../components/WorkloadGauge';
 import { GatewayHealthLED, GatewayHealthStatus } from '../components/GatewayHealthLED';
@@ -45,6 +47,22 @@ interface RecentJob {
   progress?: number;
 }
 
+interface EncoderPerformance {
+  score: number;
+  timeScore: number;
+  failureScore: number;
+  onlineScore: number;
+  avgEncodingTime: number;
+  failureRate: number;
+  onlineCount: number;
+}
+
+interface GatewayHealthScore {
+  score: number;
+  forcedCount: number;
+  totalChecked: number;
+}
+
 interface DashboardData {
   availableJobs: number;
   jobsInProgress: number;
@@ -53,6 +71,8 @@ interface DashboardData {
   recentJobs: RecentJob[];
   workload: WorkloadData;
   gatewayHealth: GatewayHealthStatus;
+  encoderPerformance: EncoderPerformance;
+  gatewayHealthScore: GatewayHealthScore;
 }
 
 export function Dashboard() {
@@ -69,7 +89,21 @@ export function Dashboard() {
       activeEncoders: 0,
       oldJobsDetected: false
     },
-    gatewayHealth: 'healthy'
+    gatewayHealth: 'healthy',
+    encoderPerformance: {
+      score: 0,
+      timeScore: 0,
+      failureScore: 0,
+      onlineScore: 0,
+      avgEncodingTime: 0,
+      failureRate: 0,
+      onlineCount: 0
+    },
+    gatewayHealthScore: {
+      score: 0,
+      forcedCount: 0,
+      totalChecked: 0
+    }
   });
   const [error, setError] = useState<string | null>(null);
 
@@ -103,7 +137,21 @@ export function Dashboard() {
           activeEncoders: 0,
           oldJobsDetected: false
         },
-        gatewayHealth: data.gatewayHealth || 'healthy'
+        gatewayHealth: data.gatewayHealth || 'healthy',
+        encoderPerformance: data.encoderPerformance || {
+          score: 0,
+          timeScore: 0,
+          failureScore: 0,
+          onlineScore: 0,
+          avgEncodingTime: 0,
+          failureRate: 0,
+          onlineCount: 0
+        },
+        gatewayHealthScore: data.gatewayHealthScore || {
+          score: 0,
+          forcedCount: 0,
+          totalChecked: 0
+        }
       });
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
@@ -206,6 +254,68 @@ export function Dashboard() {
                 </Typography>
               </div>
               <TrendingUp color="info" sx={{ fontSize: 40 }} />
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <Typography color="text.secondary" gutterBottom variant="body2">
+                  Encoder Performance
+                </Typography>
+                <Typography 
+                  variant="h4"
+                  sx={{
+                    color: dashboardData.encoderPerformance.score >= 80 ? 'success.main' :
+                           dashboardData.encoderPerformance.score >= 50 ? 'warning.main' : 'error.main'
+                  }}
+                >
+                  {Math.round(dashboardData.encoderPerformance.score)}%
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                  Avg: {Math.floor(dashboardData.encoderPerformance.avgEncodingTime / 60)}m {dashboardData.encoderPerformance.avgEncodingTime % 60}s
+                </Typography>
+              </div>
+              <Speed 
+                sx={{ 
+                  fontSize: 40,
+                  color: dashboardData.encoderPerformance.score >= 80 ? 'success.main' :
+                         dashboardData.encoderPerformance.score >= 50 ? 'warning.main' : 'error.main'
+                }} 
+              />
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <Typography color="text.secondary" gutterBottom variant="body2">
+                  Gateway Health Score
+                </Typography>
+                <Typography 
+                  variant="h4"
+                  sx={{
+                    color: dashboardData.gatewayHealthScore.score >= 80 ? 'success.main' :
+                           dashboardData.gatewayHealthScore.score >= 50 ? 'warning.main' : 'error.main'
+                  }}
+                >
+                  {Math.round(dashboardData.gatewayHealthScore.score)}%
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                  {dashboardData.gatewayHealthScore.forcedCount} forced / {dashboardData.gatewayHealthScore.totalChecked}
+                </Typography>
+              </div>
+              <HealthAndSafety 
+                sx={{ 
+                  fontSize: 40,
+                  color: dashboardData.gatewayHealthScore.score >= 80 ? 'success.main' :
+                         dashboardData.gatewayHealthScore.score >= 50 ? 'warning.main' : 'error.main'
+                }} 
+              />
             </CardContent>
           </Card>
         </Grid>

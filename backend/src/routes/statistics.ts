@@ -375,7 +375,9 @@ router.get('/dashboard', async (req, res) => {
       recentJobs,
       activeEncodersCount,
       lastCompletedJobs,
-      gatewayHealthStatus
+      gatewayHealthStatus,
+      performanceMetrics,
+      gatewayHealthScoreData
     ] = await Promise.all([
       mongodb.getAvailableJobs(),
       mongodb.getActiveJobs(),
@@ -383,7 +385,9 @@ router.get('/dashboard', async (req, res) => {
       mongodb.getRecentJobs(),
       mongodb.getActiveEncodersCount(),
       mongodb.getLastCompletedJobs(10),
-      getGatewayMonitor().getDetailedHealthStatus().catch(() => ({ isOnline: false }))
+      getGatewayMonitor().getDetailedHealthStatus().catch(() => ({ isOnline: false })),
+      mongodb.getPerformanceMetrics(),
+      mongodb.getGatewayHealthScore()
     ]);
 
     // Calculate Gateway Health
@@ -496,7 +500,21 @@ router.get('/dashboard', async (req, res) => {
         activeEncoders: activeEncodersCount,
         oldJobsDetected: oldJobsDetected
       },
-      gatewayHealth: gatewayHealth
+      gatewayHealth: gatewayHealth,
+      encoderPerformance: {
+        score: performanceMetrics.score,
+        timeScore: performanceMetrics.timeScore,
+        failureScore: performanceMetrics.failureScore,
+        onlineScore: performanceMetrics.onlineScore,
+        avgEncodingTime: performanceMetrics.avgEncodingTime,
+        failureRate: performanceMetrics.failureRate,
+        onlineCount: performanceMetrics.onlineCount
+      },
+      gatewayHealthScore: {
+        score: gatewayHealthScoreData.score,
+        forcedCount: gatewayHealthScoreData.forcedCount,
+        totalChecked: gatewayHealthScoreData.totalChecked
+      }
     };
 
     // Check and send Discord alerts if needed

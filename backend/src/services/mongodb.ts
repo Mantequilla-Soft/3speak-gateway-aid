@@ -247,6 +247,25 @@ export class MongoDBConnector {
   }
 
   /**
+   * Get count of completed jobs
+   */
+  async getCompletedJobsCount(): Promise<number> {
+    try {
+      if (!this.client || !this.connected || !this.db) {
+        logger.warn('MongoDB not connected, cannot get completed jobs count');
+        return 0;
+      }
+
+      const collection = this.db.collection('jobs');
+      const count = await collection.countDocuments({ status: 'complete' });
+      return count;
+    } catch (error) {
+      logger.error('Error counting completed jobs:', error);
+      return 0;
+    }
+  }
+
+  /**
    * Get recently completed jobs
    */
   async getCompletedJobs(limit: number = 20, offset: number = 0): Promise<Job[]> {
@@ -266,7 +285,7 @@ export class MongoDBConnector {
 
       return jobs.map((job: any) => ({
         ...job,
-        id: job._id?.toString() || job.id
+        id: job.id || job._id?.toString()
       }));
     } catch (error) {
       logger.error('Error fetching completed jobs, using demo data:', error);
@@ -648,6 +667,170 @@ export class MongoDBConnector {
     } catch (error) {
       logger.error('Error getting online cluster nodes:', error);
       return [];
+    }
+  }
+
+  /**
+   * Get encoder performance metrics (last 24 hours)
+   */
+  async getPerformanceMetrics() {
+    try {
+      if (!this.client || !this.connected || !this.db) {
+        logger.warn('MongoDB not connected, cannot calculate performance metrics');
+        return {
+          score: 0,
+          timeScore: 0,
+          failureScore: 0,
+          onlineScore: 0,
+          avgEncodingTime: 0,
+          failureRate: 0,
+          onlineCount: 0
+        };
+      }
+
+      const collection = this.db.collection('jobs');
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+      // Get completed and failed jobs from last 24 hours
+      const jobs = await collection
+        .find({
+          created_at: { $gte: oneDayAgo },
+          status: { $in: ['complete', 'failed'] }
+        })
+        .toArray();
+
+      if (jobs.length === 0) {
+        // No jobs in last 24 hours, return neutral score
+        const onlineNodes = await this.getOnlineClusterNodes();
+        const onlineCount = onlineNodes.filter(n => !n.banned).length;
+        const onlineScore = Math.min(100, (onlineCount / 7) * 100);
+        
+        return {
+          score: onlineScore * 0.2, // Only online score applies
+          timeScore: 100, // No jobs = perfect time score
+          failureScore: 100, // No jobs = perfect failure score
+          onlineScore: onlineScore,
+          avgEncodingTime: 0,
+          failureRate: 0,
+          onlineCount: onlineCount
+        };
+      }
+
+      // Calculate average encoding time for completed jobs
+      const completedJobs = jobs.filter(j => j.status === 'complete');
+      let totalEncodingTime = 0;
+      let countWithTime = 0;
+
+      for (const job of completedJobs) {
+        if (job.completed_at && job.assigned_date) {
+          const encodingTime = (new Date(job.completed_at).getTime() - new Date(job.assigned_date).getTime()) / 1000;
+          totalEncodingTime += encodingTime;
+          countWithTime++;
+        }
+      }
+
+      const avgEncodingTime = countWithTime > 0 ? totalEncodingTime / countWithTime : 0;
+
+      // Calculate time score (target: 600 seconds = 10 minutes)
+      // Under 600s = 100%, linear decrease above 600s
+      const targetTime = 600;
+      let timeScore = 100;
+      if (avgEncodingTime > 0) {
+        timeScore = Math.max(0, Math.min(100, (1 - (avgEncodingTime - targetTime) / targetTime) * 100));
+        if (avgEncodingTime <= targetTime) {
+          timeScore = 100;
+        }
+      }
+
+      // Calculate failure rate and score
+      const failedJobs = jobs.filter(j => j.status === 'failed');
+      const failureRate = jobs.length > 0 ? (failedJobs.length / jobs.length) * 100 : 0;
+      const failureScore = Math.max(0, 100 - failureRate);
+
+      // Get online encoder count
+      const onlineNodes = await this.getOnlineClusterNodes();
+      const onlineCount = onlineNodes.filter(n => !n.banned).length;
+      const onlineScore = Math.min(100, (onlineCount / 7) * 100);
+
+      // Calculate weighted score
+      // Time: 50%, Failures: 30%, Online count: 20%
+      const score = (timeScore * 0.5) + (failureScore * 0.3) + (onlineScore * 0.2);
+
+      return {
+        score: Math.round(score * 10) / 10,
+        timeScore: Math.round(timeScore * 10) / 10,
+        failureScore: Math.round(failureScore * 10) / 10,
+        onlineScore: Math.round(onlineScore * 10) / 10,
+        avgEncodingTime: Math.round(avgEncodingTime),
+        failureRate: Math.round(failureRate * 10) / 10,
+        onlineCount: onlineCount
+      };
+    } catch (error) {
+      logger.error('Error calculating performance metrics:', error);
+      return {
+        score: 0,
+        timeScore: 0,
+        failureScore: 0,
+        onlineScore: 0,
+        avgEncodingTime: 0,
+        failureRate: 0,
+        onlineCount: 0
+      };
+    }
+  }
+
+  /**
+   * Get gateway health score based on forced videos (last 20 jobs)
+   */
+  async getGatewayHealthScore() {
+    try {
+      if (!this.client || !this.connected || !this.db) {
+        logger.warn('MongoDB not connected, cannot calculate gateway health score');
+        return {
+          score: 0,
+          forcedCount: 0,
+          totalChecked: 0
+        };
+      }
+
+      const collection = this.db.collection('jobs');
+      
+      // Get last 20 completed jobs
+      const jobs = await collection
+        .find({ status: 'complete' })
+        .sort({ completed_at: -1 })
+        .limit(20)
+        .toArray();
+
+      if (jobs.length === 0) {
+        return {
+          score: 100,
+          forcedCount: 0,
+          totalChecked: 0
+        };
+      }
+
+      // Count forced videos
+      const forcedCount = jobs.filter(job => 
+        job.result?.message?.includes('Force processed')
+      ).length;
+
+      // Calculate score: 100% (no forced) to 20% (all forced)
+      // Linear scale: score = 100 - ((forcedCount / totalChecked) * 80)
+      const score = 100 - ((forcedCount / jobs.length) * 80);
+
+      return {
+        score: Math.round(score * 10) / 10,
+        forcedCount: forcedCount,
+        totalChecked: jobs.length
+      };
+    } catch (error) {
+      logger.error('Error calculating gateway health score:', error);
+      return {
+        score: 0,
+        forcedCount: 0,
+        totalChecked: 0
+      };
     }
   }
 

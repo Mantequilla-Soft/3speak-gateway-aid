@@ -11,10 +11,12 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TablePagination,
   Chip,
   LinearProgress,
   Alert,
-  CircularProgress
+  CircularProgress,
+  Link
 } from '@mui/material';
 import {
   CheckCircle,
@@ -83,9 +85,21 @@ export function Jobs() {
   const [completedJobs, setCompletedJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [totalCompletedJobs, setTotalCompletedJobs] = useState(0);
 
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
+  };
+
+  const handleChangePage = (_event: unknown, newPage: number) => {
+    setPage(newPage);
+  };
+
+  const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setRowsPerPage(parseInt(event.target.value, 10));
+    setPage(0);
   };
 
   // Format file size
@@ -132,7 +146,7 @@ export function Jobs() {
       const endpoints = [
         '/api/jobs/available',
         '/api/jobs/active',
-        '/api/jobs/completed?limit=50'
+        `/api/jobs/completed?page=${page + 1}&limit=${rowsPerPage}`
       ];
 
       const responses = await Promise.all(
@@ -145,7 +159,10 @@ export function Jobs() {
 
       if (data[0].success) setAvailableJobs(data[0].data || []);
       if (data[1].success) setActiveJobs(data[1].data || []);
-      if (data[2].success) setCompletedJobs(data[2].data || []);
+      if (data[2].success) {
+        setCompletedJobs(data[2].data || []);
+        setTotalCompletedJobs(data[2].pagination?.total || 0);
+      }
 
     } catch (error) {
       console.error('Error fetching jobs:', error);
@@ -172,7 +189,7 @@ export function Jobs() {
     }
 
     return () => intervals.forEach(interval => clearInterval(interval));
-  }, [tabValue]);
+  }, [tabValue, page, rowsPerPage]);
 
   if (loading && availableJobs.length === 0 && activeJobs.length === 0 && completedJobs.length === 0) {
     return (
@@ -207,7 +224,7 @@ export function Jobs() {
             iconPosition="start"
           />
           <Tab 
-            label={`Completed (${completedJobs.length})`} 
+            label={`Completed (${totalCompletedJobs})`} 
             icon={<CheckCircle />} 
             iconPosition="start"
           />
@@ -339,66 +356,92 @@ export function Jobs() {
               </Typography>
             </Box>
           ) : (
-            <TableContainer>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Job ID</TableCell>
-                    <TableCell>Video</TableCell>
-                    <TableCell>Encoder</TableCell>
-                    <TableCell>Completed</TableCell>
-                    <TableCell>Total Duration</TableCell>
-                    <TableCell>Encoding Time</TableCell>
-                    <TableCell>Size</TableCell>
-                    <TableCell>Status</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {completedJobs.map((job) => {
-                    const isForced = job.result?.message?.includes('Force processed');
-                    const totalDur = job.totalDuration || 0;
-                    const durColor = totalDur < 300 ? 'success' : totalDur < 1800 ? 'warning' : 'error';
-                    
-                    return (
-                      <TableRow key={job.id}>
-                        <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>
-                          {job.id.substring(0, 8)}...
-                        </TableCell>
-                        <TableCell>
-                          {job.metadata?.video_owner || job.owner}/{job.metadata?.video_permlink || job.permlink}
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="caption">
-                            {job.encoderInfo?.nodeName || (job.assigned_to ? job.assigned_to.substring(0, 20) + '...' : 'N/A')}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          {job.completed_at ? formatRelativeTime(job.completed_at) : 'N/A'}
-                        </TableCell>
-                        <TableCell>
-                          <Chip 
-                            label={formatDuration(totalDur)} 
-                            size="small" 
-                            color={durColor}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          {job.encodingDuration ? formatDuration(job.encodingDuration) : 'N/A'}
-                        </TableCell>
-                        <TableCell>{formatFileSize(job.input?.size || job.input_size || 0)}</TableCell>
-                        <TableCell>
-                          <Chip 
-                            label={isForced ? 'Forced' : 'Success'} 
-                            size="small" 
-                            color={isForced ? 'warning' : 'success'}
-                          />
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </TableContainer>
+            <>
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Job ID</TableCell>
+                      <TableCell>Video</TableCell>
+                      <TableCell>Encoder</TableCell>
+                      <TableCell>Hive Account</TableCell>
+                      <TableCell>Completed</TableCell>
+                      <TableCell>Total Duration</TableCell>
+                      <TableCell>Encoding Time</TableCell>
+                      <TableCell>Size</TableCell>
+                      <TableCell>Status</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {completedJobs.map((job) => {
+                      const isForced = job.result?.message?.includes('Force processed');
+                      const totalDur = job.totalDuration || 0;
+                      const durColor = totalDur < 300 ? 'success' : totalDur < 1800 ? 'warning' : 'error';
+                      const videoOwner = job.metadata?.video_owner || job.owner;
+                      const videoPermlink = job.metadata?.video_permlink || job.permlink;
+                      
+                      return (
+                        <TableRow key={job.id}>
+                          <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>
+                            {job.id.substring(0, 8)}...
+                          </TableCell>
+                          <TableCell>
+                            <Link
+                              href={`https://3speak.tv/watch?v=${videoOwner}/${videoPermlink}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              sx={{ textDecoration: 'none', color: 'primary.main', '&:hover': { textDecoration: 'underline' } }}
+                            >
+                              {videoOwner}/{videoPermlink}
+                            </Link>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="caption">
+                              {job.encoderInfo?.nodeName || (job.assigned_to ? job.assigned_to.substring(0, 20) + '...' : 'N/A')}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="caption">
+                              {job.encoderInfo?.hiveAccount || '-'}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            {job.completed_at ? formatRelativeTime(job.completed_at) : 'N/A'}
+                          </TableCell>
+                          <TableCell>
+                            <Chip 
+                              label={formatDuration(totalDur)} 
+                              size="small" 
+                              color={durColor}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            {job.encodingDuration ? formatDuration(job.encodingDuration) : 'N/A'}
+                          </TableCell>
+                          <TableCell>{formatFileSize(job.input?.size || job.input_size || 0)}</TableCell>
+                          <TableCell>
+                            <Chip 
+                              label={isForced ? 'Forced' : 'Success'} 
+                              size="small" 
+                              color={isForced ? 'warning' : 'success'}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+              <TablePagination
+                rowsPerPageOptions={[25, 50, 100]}
+                component="div"
+                count={totalCompletedJobs}
+                rowsPerPage={rowsPerPage}
+                page={page}
+                onPageChange={handleChangePage}
+                onRowsPerPageChange={handleChangeRowsPerPage}
+              />
+            </>
           )}
         </TabPanel>
       </Paper>

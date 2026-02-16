@@ -165,8 +165,8 @@ router.get('/completed', async (req, res) => {
       };
     });
     
-    // TODO: Get total count for proper pagination
-    const total = jobsWithEncoders.length;
+    // Get total count for proper pagination
+    const total = await mongodb.getCompletedJobsCount();
     const pages = Math.ceil(total / limit);
 
     const response: PaginatedResponse<any> = {
