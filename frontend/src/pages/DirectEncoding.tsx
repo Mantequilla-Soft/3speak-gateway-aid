@@ -194,18 +194,12 @@ export function DirectEncoding() {
     setRedispatchDialog({ open: false, job: null });
 
     try {
-      const adminPassword = import.meta.env.VITE_ADMIN_PASSWORD;
-      if (!adminPassword) {
-        throw new Error('Admin password not configured');
-      }
-
+      // Call backend proxy endpoint which forwards to embed service
       const response = await fetch(
-        `https://embed.3speak.tv/admin/jobs/${job.owner}/${job.permlink}/redispatch`,
+        `/api/direct-encoding/jobs/${job.owner}/${job.permlink}/redispatch`,
         {
           method: 'POST',
-          headers: {
-            'X-Admin-Password': adminPassword
-          }
+          credentials: 'include' // Include auth cookies
         }
       );
 
