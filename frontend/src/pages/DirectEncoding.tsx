@@ -17,7 +17,16 @@ import {
   CardContent,
   Tooltip,
   Link,
-  Stack
+  Stack,
+  IconButton,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions,
+  Button,
+  Snackbar,
+  LinearProgress
 } from '@mui/material';
 import {
   CheckCircle,
@@ -25,8 +34,10 @@ import {
   Warning,
   VideoLibrary,
   Timer,
-  Speed
+  Speed,
+  Refresh
 } from '@mui/icons-material';
+import { useAuth } from '../contexts/AuthContext';
 
 interface EmbedJob {
   _id: string;
@@ -38,6 +49,8 @@ interface EmbedJob {
   assignedAt: string;
   attemptCount: number;
   lastError: string | null;
+  encodingProgress: number | null;
+  encodingStage: string | null;
   webhookReceivedAt?: string;
   createdAt: string;
   updatedAt: string;
@@ -67,10 +80,20 @@ interface Stats {
 }
 
 export function DirectEncoding() {
+  const { isAuthenticated } = useAuth();
   const [jobs, setJobs] = useState<EmbedJob[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [redispatchDialog, setRedispatchDialog] = useState<{ open: boolean; job: EmbedJob | null }>({
+    open: false,
+    job: null
+  });
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
+    open: false,
+    message: '',
+    severity: 'success'
+  });
 
   useEffect(() => {
     fetchData();
@@ -158,6 +181,62 @@ export function DirectEncoding() {
       'default': '#757575'
     };
     return colors[encoder] || colors.default;
+  };
+
+  const handleRedispatchClick = (job: EmbedJob) => {
+    setRedispatchDialog({ open: true, job });
+  };
+
+  const handleRedispatchConfirm = async () => {
+    const job = redispatchDialog.job;
+    if (!job) return;
+
+    setRedispatchDialog({ open: false, job: null });
+
+    try {
+      const adminPassword = import.meta.env.VITE_ADMIN_PASSWORD;
+      if (!adminPassword) {
+        throw new Error('Admin password not configured');
+      }
+
+      const response = await fetch(
+        `https://embed.3speak.tv/admin/jobs/${job.owner}/${job.permlink}/redispatch`,
+        {
+          method: 'POST',
+          headers: {
+            'X-Admin-Password': adminPassword
+          }
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to redispatch: ${response.status}`);
+      }
+
+      setSnackbar({
+        open: true,
+        message: `Job ${job.owner}/${job.permlink} successfully redispatched`,
+        severity: 'success'
+      });
+
+      // Refresh the jobs list
+      fetchData();
+    } catch (err) {
+      setSnackbar({
+        open: true,
+        message: err instanceof Error ? err.message : 'Failed to redispatch job',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleRedispatchCancel = () => {
+    setRedispatchDialog({ open: false, job: null });
+  };
+
+  const handleSnackbarClose = () => {
+    setSnackbar({ ...snackbar, open: false });
   };
 
   if (loading) {
@@ -278,18 +357,21 @@ export function DirectEncoding() {
               <TableCell>Owner</TableCell>
               <TableCell>Video ID</TableCell>
               <TableCell>Status</TableCell>
+              <TableCell>Progress</TableCell>
+              <TableCell>Stage</TableCell>
               <TableCell>Encoder</TableCell>
               <TableCell>Source App</TableCell>
               <TableCell>Size</TableCell>
               <TableCell>Encoding Time</TableCell>
               <TableCell>Views</TableCell>
               <TableCell>Errors</TableCell>
+              {isAuthenticated && <TableCell align="center">Actions</TableCell>}
             </TableRow>
           </TableHead>
           <TableBody>
             {jobs.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} align="center">
+                <TableCell colSpan={isAuthenticated ? 12 : 11} align="center">
                   No jobs found
                 </TableCell>
               </TableRow>
@@ -316,6 +398,29 @@ export function DirectEncoding() {
                     )}
                   </TableCell>
                   <TableCell>{getStatusChip(job)}</TableCell>
+                  <TableCell>
+                    {job.encodingProgress !== null && job.encodingProgress !== undefined ? (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 120 }}>
+                        <LinearProgress
+                          variant="determinate"
+                          value={job.encodingProgress}
+                          sx={{ flexGrow: 1 }}
+                        />
+                        <Typography variant="caption">
+                          {job.encodingProgress}%
+                        </Typography>
+                      </Box>
+                    ) : (
+                      <Typography variant="body2" color="text.secondary">N/A</Typography>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {job.encodingStage ? (
+                      <Typography variant="body2">{job.encodingStage}</Typography>
+                    ) : (
+                      <Typography variant="body2" color="text.secondary">N/A</Typography>
+                    )}
+                  </TableCell>
                   <TableCell>
                     <Chip
                       label={job.assignedWorker}
@@ -355,12 +460,60 @@ export function DirectEncoding() {
                       <Typography variant="body2" color="text.secondary">-</Typography>
                     )}
                   </TableCell>
+                  {isAuthenticated && (
+                    <TableCell align="center">
+                      <Tooltip title={job.status === 'completed' ? 'Cannot redispatch completed jobs' : 'Re-dispatch job'}>
+                        <span>
+                          <IconButton
+                            size="small"
+                            color="primary"
+                            disabled={job.status === 'completed'}
+                            onClick={() => handleRedispatchClick(job)}
+                          >
+                            <Refresh />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))
             )}
           </TableBody>
         </Table>
       </TableContainer>
+
+      {/* Redispatch Confirmation Dialog */}
+      <Dialog open={redispatchDialog.open} onClose={handleRedispatchCancel}>
+        <DialogTitle>Confirm Re-dispatch</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Are you sure you want to re-dispatch job{' '}
+            <strong>
+              {redispatchDialog.job?.owner}/{redispatchDialog.job?.permlink}
+            </strong>
+            ? This will reset the job and assign it to another encoder.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleRedispatchCancel}>Cancel</Button>
+          <Button onClick={handleRedispatchConfirm} color="primary" variant="contained">
+            Re-dispatch
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Snackbar for notifications */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={handleSnackbarClose}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={handleSnackbarClose} severity={snackbar.severity} sx={{ width: '100%' }}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }
